@@ -28,6 +28,20 @@ export default function Reader() {
       if (chData) {
         setChapter(chData)
         
+        // Save to read history
+        try {
+          const history = JSON.parse(localStorage.getItem('arcadia_history') || '{}')
+          if (!history[chData.novel_id]) {
+            history[chData.novel_id] = []
+          }
+          if (!history[chData.novel_id].includes(chData.id)) {
+            history[chData.novel_id].push(chData.id)
+          }
+          localStorage.setItem('arcadia_history', JSON.stringify(history))
+        } catch (e) {
+          console.error("Could not save history", e)
+        }
+        
         // Load novel info
         const { data: nData } = await supabase.from('novels').select('*').eq('id', chData.novel_id).single()
         setNovel(nData)
