@@ -239,11 +239,6 @@ def get_or_create_novel(cur, title, url, cover_url):
     return cur.fetchone()[0]
 
 
-def get_latest_chapter_index(cur, novel_id):
-    cur.execute("SELECT MAX(chapter_index) FROM public.chapters WHERE novel_id = %s", (novel_id,))
-    res = cur.fetchone()
-    return res[0] if res and res[0] is not None else 0
-
 
 def run(target_url=None):
     if not target_url:
@@ -277,8 +272,9 @@ def run_single_novel(novel_url):
     novel_id = get_or_create_novel(cur, title, novel_url, cover_url)
     conn.commit()
 
-    latest_index = get_latest_chapter_index(cur, novel_id)
-    print(f"Latest chapter in DB is {latest_index}")
+    cur.execute("SELECT chapter_index FROM public.chapters c WHERE c.novel_id = %s AND EXISTS (SELECT 1 FROM public.contents cont WHERE cont.chapter_id = c.id LIMIT 1)", (novel_id,))
+    completed_indices = set(row[0] for row in cur.fetchall())
+    print(f"Completed chapters in DB: {len(completed_indices)}")
 
     cur.close()
     db_pool.putconn(conn)
@@ -288,7 +284,7 @@ def run_single_novel(novel_url):
 
     for i, ch in enumerate(chapters):
         chapter_idx = i + 1
-        if chapter_idx > latest_index:
+        if chapter_idx not in completed_indices:
             q.put((chapter_idx, ch))
             tasks_added += 1
 
@@ -298,7 +294,8 @@ def run_single_novel(novel_url):
 
     print(f"Adding {tasks_added} new chapters to the queue.")
 
-    threading.Thread(target=db_writer, daemon=True).start()
+    writer_thread = threading.Thread(target=db_writer, daemon=True)
+    writer_thread.start()
 
     threads = []
     for _ in range(WORKERS):
@@ -311,8 +308,8 @@ def run_single_novel(novel_url):
 
     insert_queue.put(None)
     
-    # Allow db_writer to finish
-    time.sleep(1)
+    # Wait for db_writer to finish
+    writer_thread.join()
 
     print(f"DONE OPTIMIZED for {title}")
 
