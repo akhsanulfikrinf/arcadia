@@ -17,14 +17,32 @@ export default function Reader() {
   
   const [loading, setLoading] = useState(true)
   const [fontSize, setFontSize] = useState(18)
-
-  // Initialize dark mode from system or html attribute
-  useEffect(() => {
-    // If we want to read it from classList later we can, nothing to setup here without state
-  }, [])
+  const [isBookmarked, setIsBookmarked] = useState(false)
 
   const toggleDarkMode = () => {
-    document.documentElement.classList.toggle('dark')
+    const isDark = document.documentElement.classList.toggle('dark')
+    if (isDark) {
+      localStorage.setItem('arcadia_theme', 'dark')
+    } else {
+      localStorage.removeItem('arcadia_theme')
+    }
+  }
+
+  const toggleBookmark = () => {
+    try {
+      const bookmarks = JSON.parse(localStorage.getItem('arcadia_bookmarks') || '[]')
+      if (bookmarks.includes(id)) {
+        const newBookmarks = bookmarks.filter((bId: string) => bId !== id)
+        localStorage.setItem('arcadia_bookmarks', JSON.stringify(newBookmarks))
+        setIsBookmarked(false)
+      } else {
+        bookmarks.push(id)
+        localStorage.setItem('arcadia_bookmarks', JSON.stringify(bookmarks))
+        setIsBookmarked(true)
+      }
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   useEffect(() => {
@@ -47,6 +65,9 @@ export default function Reader() {
             history[chData.novel_id].push(chData.id)
           }
           localStorage.setItem('arcadia_history', JSON.stringify(history))
+          
+          const bookmarks = JSON.parse(localStorage.getItem('arcadia_bookmarks') || '[]')
+          setIsBookmarked(bookmarks.includes(chData.id))
         } catch (e) {
           console.error("Could not save history", e)
         }
@@ -126,8 +147,8 @@ export default function Reader() {
               <button onClick={() => setFontSize(f => Math.max(14, f - 2))} className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition">
                 <Minus className="w-5 h-5" />
               </button>
-              <button className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition">
-                <Bookmark className="w-5 h-5 fill-current" />
+              <button onClick={toggleBookmark} className={`w-10 h-10 rounded-full flex justify-center items-center transition ${isBookmarked ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-800 text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                <Bookmark className={`w-5 h-5 ${isBookmarked ? 'fill-current' : ''}`} />
               </button>
               <button onClick={toggleDarkMode} className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition">
                 <Moon className="w-5 h-5 fill-current" />
@@ -153,6 +174,11 @@ export default function Reader() {
         <div style={{ fontSize: `${fontSize}px`, lineHeight: '2' }} className="max-w-3xl mx-auto font-sans tracking-wide">
         <div className="space-y-6">
           {contents.map((block) => {
+            // Prevent duplication of the chapter title inside the content
+            if (block.content && block.content.trim().toLowerCase() === chapter.title.toLowerCase()) {
+              return null
+            }
+            
             if (block.type === 'title') {
               return <h3 key={block.id} className="font-bold mt-12 mb-6 text-gray-900 dark:text-gray-100" style={{ fontSize: `${fontSize * 1.3}px` }}>{block.content}</h3>
             }
@@ -164,31 +190,6 @@ export default function Reader() {
                 <div key={block.id} className="my-10 flex justify-center w-full">
                   <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto" loading="lazy" />
                 </div>
-              )
-            }
-            
-            // Format Bab/Chapter prefixes
-            const match = block.content.match(/^((?:Bab|Chapter)\s+\d+[^A-Z]*[a-zA-Z\s]+?)(?=\s+[A-Z])/i)
-            if (match && match[1]) {
-              return (
-                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
-                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.2}px` }}>
-                    {match[1].trim()}
-                  </span>
-                  {block.content.substring(match[1].length).trim()}
-                </p>
-              )
-            }
-            // Fallback for smaller chapters simply prefixed with Bab/Chapter: but without Title
-            const simpleMatch = block.content.match(/^((?:Bab|Chapter)\s+\d+:?)\s+/i)
-            if (simpleMatch && simpleMatch[1]) {
-              return (
-                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
-                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.2}px` }}>
-                    {simpleMatch[1].trim()}
-                  </span>
-                  {block.content.substring(simpleMatch[1].length).trim()}
-                </p>
               )
             }
 

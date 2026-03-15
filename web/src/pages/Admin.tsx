@@ -7,22 +7,6 @@ export default function Admin() {
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
-  
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [authError, setAuthError] = useState('')
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (username === 'Sucry' && password === 'Sucry_01#') {
-      setIsAuthenticated(true)
-      setAuthError('')
-    } else {
-      setAuthError('Invalid username or password')
-    }
-  }
 
   const [recommendations, setRecommendations] = useState<any[]>([])
 
@@ -33,10 +17,10 @@ export default function Admin() {
         setRecommendations(data)
       }
     }
-    if (isAuthenticated) {
+    if (true) {
       loadNovels()
     }
-  }, [isAuthenticated])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,34 +75,7 @@ export default function Admin() {
         <ArrowLeft className="w-4 h-4 mr-1" /> Back to Library
       </Link>
 
-      {!isAuthenticated ? (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700 max-w-md mx-auto">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Admin Login</h1>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Username</label>
-              <input 
-                type="text" 
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Password</label>
-              <input 
-                type="password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-            </div>
-            {authError && <p className="text-red-500 text-sm">{authError}</p>}
-            <button type="submit" className="w-full bg-indigo-600 text-white rounded-xl py-3 font-medium hover:bg-indigo-700 transition mt-4">Login</button>
-          </form>
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Add New Novel</h1>
         <p className="text-gray-500 dark:text-gray-400 mb-8">Enter the URL of the light novel from meionovels.com to add it to your library and trigger the scraper.</p>
         
@@ -186,7 +143,6 @@ export default function Admin() {
           </button>
         </form>
       </div>
-      )}
     </div>
   )
 }
