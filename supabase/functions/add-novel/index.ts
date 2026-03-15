@@ -39,7 +39,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ref: "master",
+          ref: "main",
           inputs: {
             novel_url: novel_url
           }

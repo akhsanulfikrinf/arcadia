@@ -65,7 +65,7 @@ def smart_split(blocks):
 
 
 def scrape_chapter(page, url):
-    page.goto(url)
+    page.goto(url, timeout=60000, wait_until="domcontentloaded")
     time.sleep(random.uniform(1, 2))
 
     blocks = page.evaluate("""
@@ -192,7 +192,7 @@ def get_chapters(novel_url):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(novel_url)
+        page.goto(novel_url, timeout=60000, wait_until="domcontentloaded")
 
         title = page.title().split('-')[0].strip()
 
