@@ -185,12 +185,19 @@ export default function Reader() {
         >
         <div className="space-y-6">
           {contents.map((block) => {
-            // Prevent duplication of the chapter title inside the content
-            if (block.content && block.content.trim().toLowerCase() === chapter.title.toLowerCase()) {
-              return null
+            if (!block.content) return null;
+            
+            // 1. Prevent duplication of the chapter title
+            const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (normalizeString(block.content) === normalizeString(chapter.title)) {
+              return null;
+            }
+            if (normalizeString(block.content) === normalizeString(novel?.title || '') + normalizeString(chapter.title)) {
+              return null;
             }
             
             if (block.type === 'title') {
+              // Format title blocks as bold
               return <h3 key={block.id} className="font-bold mt-12 mb-6 text-gray-900 dark:text-gray-100" style={{ fontSize: `${fontSize * 1.3}px` }}>{block.content}</h3>
             }
             if (block.type === 'dialog') {
@@ -204,32 +211,40 @@ export default function Reader() {
               )
             }
             
-            // Format Bab/Chapter prefixes
-            const match = block.content.match(/^((?:Bab|Chapter)\s+\d+[^A-Z]*[a-zA-Z\s]+?)(?=\s+[A-Z])/i)
+            // 2. Format custom Bab / Chapter titles embedded within paragraphs
+            const textStr = block.content.trim();
+            // Match "Bab X: Title" or "Chapter X: Title" where it could be the whole string,
+            // or it might continue into a paragraph.
+            // This regex tries to capture the prefix "Bab 2: Dua Selir"
+            const babRegex = /^((?:Bab|Chapter)\s+\d+(?:[\s:-]+[A-Z][a-zA-Z0-9\s]*?)?)(?:(?=[.!?]|[\r\n]|\s+[A-Z“"'])|$)/i;
+            const match = textStr.match(babRegex);
+            
             if (match && match[1]) {
-              return (
-                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
-                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.3}px` }}>
-                    {match[1].trim()}
-                  </span>
-                  {block.content.substring(match[1].length).trim()}
-                </p>
-              )
-            }
-            // Fallback for smaller chapters simply prefixed with Bab/Chapter: but without Title
-            const simpleMatch = block.content.match(/^((?:Bab|Chapter)\s+\d+:?)\s+/i)
-            if (simpleMatch && simpleMatch[1]) {
-              return (
-                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
-                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.3}px` }}>
-                    {simpleMatch[1].trim()}
-                  </span>
-                  {block.content.substring(simpleMatch[1].length).trim()}
-                </p>
-              )
+              const prefix = match[1].trim();
+              const remainder = textStr.substring(prefix.length).trim();
+              
+              if (remainder.length === 0) {
+                // The entire block is just the title!
+                return (
+                  <p key={block.id} className="text-left mb-6 mt-12 text-gray-700 dark:text-gray-300">
+                    <span className="block font-bold text-gray-900 dark:text-white" style={{ fontSize: `${fontSize * 1.3}px` }}>
+                      {prefix}
+                    </span>
+                  </p>
+                )
+              } else {
+                return (
+                  <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
+                    <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.3}px` }}>
+                      {prefix}
+                    </span>
+                    {remainder}
+                  </p>
+                )
+              }
             }
 
-            return <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">{block.content}</p>
+            return <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">{textStr}</p>
           })}
         </div>
         </div>
