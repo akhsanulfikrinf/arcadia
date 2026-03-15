@@ -151,28 +151,50 @@ export default function Reader() {
 
         {/* Main Reading Content */}
         <div style={{ fontSize: `${fontSize}px`, lineHeight: '2' }} className="max-w-3xl mx-auto font-sans tracking-wide">
-          <h2 className="text-[1.5em] font-bold text-gray-800 dark:text-white mb-10 text-left">
-            {chapter.title}
-          </h2>
-          
-          <div className="space-y-6">
-            {contents.map((block) => {
-              if (block.type === 'title') {
-                return <h3 key={block.id} className="font-bold mt-12 mb-6 text-gray-900 dark:text-gray-100" style={{ fontSize: `${fontSize * 1.3}px` }}>{block.content}</h3>
-              }
-              if (block.type === 'dialog') {
-                return <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">{block.content}</p>
-              }
-              if (block.type === 'image') {
-                return (
-                  <div key={block.id} className="my-10 flex justify-center w-full">
-                    <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto" loading="lazy" />
-                  </div>
-                )
-              }
+        <div className="space-y-6">
+          {contents.map((block) => {
+            if (block.type === 'title') {
+              return <h3 key={block.id} className="font-bold mt-12 mb-6 text-gray-900 dark:text-gray-100" style={{ fontSize: `${fontSize * 1.3}px` }}>{block.content}</h3>
+            }
+            if (block.type === 'dialog') {
               return <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">{block.content}</p>
-            })}
-          </div>
+            }
+            if (block.type === 'image') {
+              return (
+                <div key={block.id} className="my-10 flex justify-center w-full">
+                  <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto" loading="lazy" />
+                </div>
+              )
+            }
+            
+            // Format Bab/Chapter prefixes
+            const match = block.content.match(/^((?:Bab|Chapter)\s+\d+[^A-Z]*[a-zA-Z\s]+?)(?=\s+[A-Z])/i)
+            if (match && match[1]) {
+              return (
+                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
+                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.2}px` }}>
+                    {match[1].trim()}
+                  </span>
+                  {block.content.substring(match[1].length).trim()}
+                </p>
+              )
+            }
+            // Fallback for smaller chapters simply prefixed with Bab/Chapter: but without Title
+            const simpleMatch = block.content.match(/^((?:Bab|Chapter)\s+\d+:?)\s+/i)
+            if (simpleMatch && simpleMatch[1]) {
+              return (
+                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
+                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.2}px` }}>
+                    {simpleMatch[1].trim()}
+                  </span>
+                  {block.content.substring(simpleMatch[1].length).trim()}
+                </p>
+              )
+            }
+
+            return <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">{block.content}</p>
+          })}
+        </div>
         </div>
 
         {/* Bottom Navigation */}

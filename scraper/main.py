@@ -32,35 +32,27 @@ def normalize(t):
 
 def smart_split(blocks):
     result = []
-    buffer = ""
-
-    def flush():
-        nonlocal buffer
-        if buffer.strip():
-            result.append({"type": "paragraph", "content": buffer.strip()})
-        buffer = ""
-
+    
     for b in blocks:
         if b["type"] == "text":
             t = normalize(b["content"])
+            
+            if not t:
+                continue
 
-            if len(t) < 60 and t.upper() == t:
-                flush()
+            if len(t) < 60 and (t.upper() == t or t.lower().startswith("bab ") or t.lower().startswith("chapter ")):
                 result.append({"type": "title", "content": t})
-                continue
-
-            if t.startswith("“") or t.startswith('"'):
-                flush()
+            elif t.startswith("“") or t.startswith('"'):
                 result.append({"type": "dialog", "content": t})
-                continue
+            else:
+                result.append({"type": "paragraph", "content": t})
 
-            buffer += " " + t
-
+        elif b["type"] == "title":
+            result.append({"type": "title", "content": normalize(b["content"])})
+            
         elif b["type"] == "image":
-            flush()
             result.append(b)
 
-    flush()
     return result
 
 
@@ -76,17 +68,27 @@ def scrape_chapter(page, url):
         let result = [];
 
         function walk(node) {
-            node.childNodes.forEach(n => {
-                if (n.nodeType === Node.TEXT_NODE) {
-                    let t = n.textContent.trim();
-                    if (t) result.push({type:'text', content:t});
-                } else if (n.nodeName === 'IMG') {
-                    let src = n.dataset.src || n.src;
+            if (node.nodeName === 'P' || (/^H[1-6]$/).test(node.nodeName)) {
+                let text = node.textContent.trim();
+                let imgs = node.querySelectorAll('img');
+                
+                imgs.forEach(img => {
+                    let src = img.dataset.src || img.src;
                     if (src) result.push({type:'image', src:src});
-                } else {
-                    walk(n);
+                });
+                
+                if (text) {
+                    result.push({type: node.nodeName === 'P' ? 'text' : 'title', content: text});
                 }
-            });
+            } else if (node.nodeName === 'IMG') {
+                let src = node.dataset.src || node.src;
+                if (src) result.push({type:'image', src:src});
+            } else if (node.childNodes && node.childNodes.length > 0 && !['A','SPAN','STRONG','EM','I','B'].includes(node.nodeName)) {
+                node.childNodes.forEach(walk);
+            } else if (node.nodeType === Node.TEXT_NODE) {
+                let t = node.textContent.trim();
+                if (t) result.push({type:'text', content:t});
+            }
         }
 
         walk(container);

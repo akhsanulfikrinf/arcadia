@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Plus, Loader2, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
@@ -24,11 +24,19 @@ export default function Admin() {
     }
   }
 
-  const recommendations = [
-    { title: "Kusuriya no Hitorigoto", url: "https://meionovels.com/novel/kusuriya-no-hitorigoto-ln/" },
-    { title: "Classroom of the Elite", url: "https://meionovels.com/novel/youkoso-jitsuryoku-shijou-shugi-no-kyoushitsu-e/" },
-    { title: "Mushoku Tensei", url: "https://meionovels.com/novel/mushoku-tensei-light-novel/" },
-  ]
+  const [recommendations, setRecommendations] = useState<any[]>([])
+
+  useEffect(() => {
+    async function loadNovels() {
+      const { data, error } = await supabase.from('novels').select('title, url').order('created_at', { ascending: false }).limit(4)
+      if (data && !error) {
+        setRecommendations(data)
+      }
+    }
+    if (isAuthenticated) {
+      loadNovels()
+    }
+  }, [isAuthenticated])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -128,21 +136,23 @@ export default function Admin() {
             />
           </div>
           
-          <div className="mb-6">
-            <span className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">Quick Recommendations:</span>
-            <div className="flex flex-wrap gap-2">
-              {recommendations.map((rec, i) => (
-                <button 
-                  key={i} 
-                  type="button" 
-                  onClick={() => setUrl(rec.url)}
-                  className="px-3 py-1.5 bg-indigo-50 dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm hover:bg-indigo-100 dark:hover:bg-gray-600 transition"
-                >
-                  {rec.title}
-                </button>
-              ))}
+          {recommendations.length > 0 && (
+            <div className="mb-6">
+              <span className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">Quick Recommendations (Re-scrape added novels):</span>
+              <div className="flex flex-wrap gap-2">
+                {recommendations.map((rec, i) => (
+                  <button 
+                    key={i} 
+                    type="button" 
+                    onClick={() => setUrl(rec.url)}
+                    className="px-3 py-1.5 bg-indigo-50 dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm hover:bg-indigo-100 dark:hover:bg-gray-600 transition truncate max-w-[200px]"
+                  >
+                    {rec.title}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           
           {status === 'error' && (
             <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-xl text-sm border border-red-100 dark:border-red-800">
