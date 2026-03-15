@@ -193,6 +193,11 @@ def get_chapters(novel_url):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(novel_url, timeout=60000, wait_until="domcontentloaded")
+        
+        try:
+            page.wait_for_selector('.wp-manga-chapter a', timeout=20000)
+        except Exception as e:
+            print(f"Warning: Timed out waiting for chapters to load: {e}")
 
         title = page.title().split('-')[0].strip()
 
