@@ -171,7 +171,18 @@ export default function Reader() {
         </div>
 
         {/* Main Reading Content */}
-        <div style={{ fontSize: `${fontSize}px`, lineHeight: '2' }} className="max-w-3xl mx-auto font-sans tracking-wide">
+        <div 
+          style={{ fontSize: `${fontSize}px`, lineHeight: '2' }} 
+          className="max-w-3xl mx-auto font-sans tracking-wide select-none"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            alert("Content is protected");
+          }}
+          onCopy={(e) => {
+            e.preventDefault();
+            alert("Content is protected");
+          }}
+        >
         <div className="space-y-6">
           {contents.map((block) => {
             // Prevent duplication of the chapter title inside the content
@@ -188,8 +199,33 @@ export default function Reader() {
             if (block.type === 'image') {
               return (
                 <div key={block.id} className="my-10 flex justify-center w-full">
-                  <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto" loading="lazy" />
+                  <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto pointer-events-none" loading="lazy" />
                 </div>
+              )
+            }
+            
+            // Format Bab/Chapter prefixes
+            const match = block.content.match(/^((?:Bab|Chapter)\s+\d+[^A-Z]*[a-zA-Z\s]+?)(?=\s+[A-Z])/i)
+            if (match && match[1]) {
+              return (
+                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
+                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.3}px` }}>
+                    {match[1].trim()}
+                  </span>
+                  {block.content.substring(match[1].length).trim()}
+                </p>
+              )
+            }
+            // Fallback for smaller chapters simply prefixed with Bab/Chapter: but without Title
+            const simpleMatch = block.content.match(/^((?:Bab|Chapter)\s+\d+:?)\s+/i)
+            if (simpleMatch && simpleMatch[1]) {
+              return (
+                <p key={block.id} className="text-left mb-6 text-gray-700 dark:text-gray-300">
+                  <span className="block font-bold text-gray-900 dark:text-white mb-2" style={{ fontSize: `${fontSize * 1.3}px` }}>
+                    {simpleMatch[1].trim()}
+                  </span>
+                  {block.content.substring(simpleMatch[1].length).trim()}
+                </p>
               )
             }
 
