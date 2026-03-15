@@ -108,13 +108,14 @@ export default function NovelDetails() {
               )}
             </div>
             {chapters.length > 0 && (
-              <div className="flex gap-3">
-                <Link to={`/read/${chapters[0].id}`} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm hover:shadow-md inline-block">
-                  Read First
-                </Link>
-                {readHistory.length > 0 && (
-                  <Link to={`/read/${readHistory[readHistory.length - 1]}`} className="bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-gray-600 px-8 py-3 rounded-xl font-medium hover:bg-indigo-50 dark:hover:bg-gray-600 transition shadow-sm inline-block">
-                    Continue
+              <div className="flex gap-3 mt-2">
+                {readHistory.length > 0 ? (
+                  <Link to={`/read/${readHistory[readHistory.length - 1]}`} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm hover:shadow-md inline-block">
+                    Continue Reading
+                  </Link>
+                ) : (
+                  <Link to={`/read/${chapters[0].id}`} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm hover:shadow-md inline-block">
+                    Start Reading
                   </Link>
                 )}
               </div>
