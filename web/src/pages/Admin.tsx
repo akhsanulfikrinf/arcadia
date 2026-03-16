@@ -71,38 +71,38 @@ export default function Admin() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
-      <Link to="/" className="inline-flex items-center text-sm text-gray-500 hover:text-indigo-600 mb-8 transition">
+      <Link to="/" className="inline-flex items-center text-sm font-bold text-black dark:text-white hover:opacity-70 mb-8 transition">
         <ArrowLeft className="w-4 h-4 mr-1" /> Back to Library
       </Link>
 
       <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Add New Novel</h1>
-        <p className="text-gray-500 dark:text-gray-400 mb-8">Enter the URL of the light novel from meionovels.com to add it to your library and trigger the scraper.</p>
+        <h1 className="text-2xl font-bold text-black dark:text-white mb-2">Add New Novel</h1>
+        <p className="text-black/70 dark:text-white/70 mb-8">Enter the URL of the light novel from meionovels.com to add it to your library and trigger the scraper.</p>
         
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Novel URL</label>
+            <label htmlFor="url" className="block text-sm font-medium text-black dark:text-white mb-2">Novel URL</label>
             <input 
               type="url" 
               id="url" 
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://meionovels.com/novel/example-novel/"
-              className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition outline-none"
+              className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-black dark:text-white focus:ring-2 focus:ring-black dark:focus:ring-white transition outline-none"
               disabled={status === 'loading'}
             />
           </div>
           
           {recommendations.length > 0 && (
             <div className="mb-6">
-              <span className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">Quick Recommendations (Re-scrape added novels):</span>
+              <span className="text-sm font-medium text-black/70 dark:text-white/70 mb-2 block">Quick Recommendations (Re-scrape added novels):</span>
               <div className="flex flex-wrap gap-2">
                 {recommendations.map((rec, i) => (
                   <button 
                     key={i} 
                     type="button" 
                     onClick={() => setUrl(rec.url)}
-                    className="px-3 py-1.5 bg-indigo-50 dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm hover:bg-indigo-100 dark:hover:bg-gray-600 transition truncate max-w-[200px]"
+                    className="px-3 py-1.5 bg-black text-white dark:bg-white dark:text-black rounded-lg text-sm hover:opacity-80 transition truncate max-w-[200px]"
                   >
                     {rec.title}
                   </button>
@@ -127,7 +127,7 @@ export default function Admin() {
           <button 
             type="submit" 
             disabled={status === 'loading' || !url}
-            className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            className="w-full flex justify-center items-center py-3 px-4 rounded-xl shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {status === 'loading' ? (
               <>

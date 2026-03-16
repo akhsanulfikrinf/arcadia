@@ -28,14 +28,14 @@ export default function Home() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Library</h1>
-        <Link to="/admin" className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">Add Novel</Link>
+        <h1 className="text-3xl font-bold text-black dark:text-white">Library</h1>
+        <Link to="/admin" className="text-black dark:text-white hover:opacity-70 font-medium">Add Novel</Link>
       </div>
       
       {novels.length === 0 ? (
-        <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-xl">
-          <p className="text-gray-500 dark:text-gray-400">Your library is empty.</p>
-          <Link to="/admin" className="mt-4 inline-block bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">Add your first novel</Link>
+        <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          <p className="text-black dark:text-white">Your library is empty.</p>
+          <Link to="/admin" className="mt-4 inline-block bg-black text-white dark:bg-white dark:text-black px-6 py-2 rounded-lg hover:opacity-80 transition">Add your first novel</Link>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -53,7 +53,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="p-4">
-                  <h2 className="font-semibold text-gray-900 dark:text-white line-clamp-2" title={novel.title}>{novel.title}</h2>
+                  <h2 className="font-semibold text-black dark:text-white line-clamp-2" title={novel.title}>{novel.title}</h2>
                 </div>
               </div>
             </Link>

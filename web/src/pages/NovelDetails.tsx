@@ -76,7 +76,7 @@ export default function NovelDetails() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 font-sans">
-      <Link to="/" className="inline-flex items-center text-sm text-gray-500 hover:text-indigo-600 mb-6 transition">
+      <Link to="/" className="inline-flex items-center text-sm font-bold text-black dark:text-white hover:opacity-70 mb-6 transition">
         <ArrowLeft className="w-4 h-4 mr-1" /> Back to Library
       </Link>
       
@@ -92,29 +92,29 @@ export default function NovelDetails() {
         </div>
         <div className="flex items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4 leading-tight">{novel.title}</h1>
+            <h1 className="text-3xl font-bold text-black dark:text-white mb-4 leading-tight">{novel.title}</h1>
             <div className="flex flex-col mb-6">
-              <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
+              <div className="flex items-center text-black/70 dark:text-white/70 mb-2">
                 <BookOpen className="w-5 h-5 mr-2" />
                 <span>{chapters.length} Chapters available</span>
               </div>
               {chapters.length > 0 && (
                 <div className="flex items-center gap-3">
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 max-w-[200px]">
-                    <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${percentRead}%` }}></div>
+                    <div className="bg-black dark:bg-white h-2.5 rounded-full" style={{ width: `${percentRead}%` }}></div>
                   </div>
-                  <span className="text-sm font-medium text-gray-500">{percentRead}% Read ({totalReadCount}/{chapters.length})</span>
+                  <span className="text-sm font-medium text-black/70 dark:text-white/70">{percentRead}% Read ({totalReadCount}/{chapters.length})</span>
                 </div>
               )}
             </div>
             {chapters.length > 0 && (
               <div className="flex gap-3 mt-2">
                 {readHistory.length > 0 ? (
-                  <Link to={`/read/${readHistory[readHistory.length - 1]}`} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm hover:shadow-md inline-block">
+                  <Link to={`/read/${readHistory[readHistory.length - 1]}`} className="bg-black text-white dark:bg-white dark:text-black px-8 py-3 rounded-xl font-medium hover:opacity-80 transition shadow-sm hover:shadow-md inline-block">
                     Continue Reading
                   </Link>
                 ) : (
-                  <Link to={`/read/${chapters[0].id}`} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm hover:shadow-md inline-block">
+                  <Link to={`/read/${chapters[0].id}`} className="bg-black text-white dark:bg-white dark:text-black px-8 py-3 rounded-xl font-medium hover:opacity-80 transition shadow-sm hover:shadow-md inline-block">
                     Start Reading
                   </Link>
                 )}
@@ -125,7 +125,7 @@ export default function NovelDetails() {
       </div>
       
       <div>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+        <h2 className="text-xl font-bold text-black dark:text-white mb-6 flex items-center">
           Chapters List
         </h2>
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden border border-gray-100 dark:border-gray-700">
@@ -139,8 +139,8 @@ export default function NovelDetails() {
                     onClick={() => toggleVolume(volName)}
                     className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
                   >
-                    <span className="font-bold text-gray-800 dark:text-gray-200">{volName} <span className="text-gray-400 font-normal text-sm ml-2">({volChapters.length} chapters)</span></span>
-                    <span className="text-gray-400 text-xl">{expandedVolumes[volName] ? '−' : '+'}</span>
+                    <span className="font-bold text-black dark:text-white">{volName} <span className="text-black/50 dark:text-white/50 font-normal text-sm ml-2">({volChapters.length} chapters)</span></span>
+                    <span className="text-black dark:text-white text-xl">{expandedVolumes[volName] ? '−' : '+'}</span>
                   </button>
                   
                   {expandedVolumes[volName] && (
@@ -151,13 +151,13 @@ export default function NovelDetails() {
                           <Link 
                             key={chapter.id} 
                             to={`/read/${chapter.id}`}
-                            className={`flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition group ${isRead ? 'opacity-70' : ''}`}
+                            className={`flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition group ${isRead ? 'opacity-50' : ''}`}
                           >
                             <div className="flex items-center">
-                              <span className={`w-12 text-sm font-mono ${isRead ? 'text-indigo-400' : 'text-gray-400'}`}>
+                              <span className={`w-12 text-sm font-mono text-black dark:text-white`}>
                                 {isRead ? '✓ Read' : `Ch ${chapter.chapter_index}`}
                               </span>
-                              <span className={`font-medium transition pl-2 ${isRead ? 'text-gray-500 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-700 dark:text-gray-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`}>
+                              <span className={`font-medium transition pl-2 ${isRead ? 'text-black dark:text-white line-through' : 'text-black dark:text-white'}`}>
                                 {chapter.title}
                               </span>
                             </div>
