@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Loader2, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, CheckCircle2, RefreshCw } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
 export default function Admin() {
@@ -66,6 +66,42 @@ export default function Admin() {
       console.error(err)
       setStatus('error')
       setMessage(err.message || 'An error occurred while adding the novel.')
+    }
+  }
+
+  const handleRescrapeAll = async () => {
+    const pwd = window.prompt("Enter admin password to trigger a full re-scrape of all novels:");
+    if (pwd !== 'Sucry_01#') {
+        if (pwd !== null) {
+            alert("Incorrect password!");
+        }
+        return;
+    }
+    
+    setStatus('loading');
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const functionUrl = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/add-novel'
+      
+      const res = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ novel_url: 'ALL_FORCE' })
+      })
+      
+      const data = await res.json()
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to trigger full rescrape')
+      
+      setStatus('success')
+      setMessage('Full re-scrape triggered! All novels will have their chapters refreshed.')
+    } catch (err: any) {
+      console.error(err)
+      setStatus('error')
+      setMessage(err.message || 'An error occurred while re-scraping.')
     }
   }
 
@@ -142,6 +178,20 @@ export default function Admin() {
             )}
           </button>
         </form>
+
+        <div className="mt-12 pt-8 border-t border-gray-100 dark:border-gray-700">
+          <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-2">Danger Zone</h2>
+          <p className="text-sm text-black/70 dark:text-white/70 mb-4">Force a complete re-scrape of all novels in your library. This will delete all existing chapter contents and re-download them. Use this if illustrations or text are broken across multiple novels.</p>
+          <button
+              type="button"
+              onClick={handleRescrapeAll}
+              disabled={status === 'loading'}
+              className="w-full flex justify-center items-center py-3 px-6 rounded-xl shadow-sm text-sm font-bold text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 transition"
+          >
+              {status === 'loading' ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <RefreshCw className="w-5 h-5 mr-2" />}
+              Force Re-scrape All Novels
+          </button>
+        </div>
       </div>
     </div>
   )

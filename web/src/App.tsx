@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
-import { BookOpen, Moon, Sun } from 'lucide-react'
+import { BookOpen, Moon, Sun, UserCircle, LogOut, Bookmark, History, Settings } from 'lucide-react'
 import Home from './pages/Home'
 import NovelDetails from './pages/NovelDetails'
 import Reader from './pages/Reader'
@@ -17,6 +17,8 @@ function App() {
   const [isDarkMode, setIsDarkMode] = useState(
     localStorage.getItem('arcadia_theme') !== 'light'
   )
+
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
 
   useEffect(() => {
     if (isDarkMode) {
@@ -37,6 +39,12 @@ function App() {
     } else {
       setAuthError('Invalid username or password')
     }
+  }
+
+  const handleLogout = () => {
+    setIsAuthenticated(false)
+    localStorage.removeItem('arcadia_auth')
+    setIsProfileMenuOpen(false)
   }
 
   if (!isAuthenticated) {
@@ -93,6 +101,34 @@ function App() {
               >
                 {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
+              
+              <div className="relative">
+                <button 
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition text-black dark:text-white"
+                >
+                  <UserCircle className="w-6 h-6" />
+                </button>
+
+                {isProfileMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 py-2 overflow-hidden animate-in fade-in zoom-in duration-200 origin-top-right">
+                    <Link 
+                      to="/admin" 
+                      className="flex items-center px-4 py-3 text-sm text-black dark:text-white hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                      onClick={() => setIsProfileMenuOpen(false)}
+                    >
+                      <Settings className="w-4 h-4 mr-3" /> Admin / Log
+                    </Link>
+                    <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+                    <button 
+                      onClick={handleLogout}
+                      className="flex items-center w-full px-4 py-3 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                    >
+                      <LogOut className="w-4 h-4 mr-3" /> Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>

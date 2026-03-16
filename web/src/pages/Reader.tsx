@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Plus, Minus, Bookmark, Moon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Minus, Bookmark } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
 export default function Reader() {
@@ -18,15 +18,6 @@ export default function Reader() {
   const [loading, setLoading] = useState(true)
   const [fontSize, setFontSize] = useState(18)
   const [isBookmarked, setIsBookmarked] = useState(false)
-
-  const toggleDarkMode = () => {
-    const isDark = document.documentElement.classList.toggle('dark')
-    if (isDark) {
-      localStorage.setItem('arcadia_theme', 'dark')
-    } else {
-      localStorage.removeItem('arcadia_theme')
-    }
-  }
 
   const toggleBookmark = () => {
     try {
@@ -126,9 +117,9 @@ export default function Reader() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-16 border-b border-gray-200 dark:border-gray-800 pb-8">
           
           {/* Chapter Selector */}
-          <div className="flex-1">
+          <div className="flex-1 max-w-[240px]">
             <select 
-              className="bg-gray-100 dark:bg-gray-800 text-black dark:text-white rounded-lg px-4 py-3 outline-none min-w-[240px] appearance-none font-bold cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+              className="bg-black text-white dark:bg-white dark:text-black rounded-lg px-4 py-3 outline-none w-full appearance-none font-bold cursor-pointer transition hover:opacity-80"
               value={chapter.id}
               onChange={(e) => navigate(`/read/${e.target.value}`)}
             >
@@ -139,34 +130,47 @@ export default function Reader() {
           </div>
 
           {/* Buttons Group */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
-              <button onClick={() => setFontSize(f => Math.min(32, f + 2))} className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-black dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+              <button onClick={() => setFontSize(f => Math.min(32, f + 2))} className="w-10 h-10 rounded-full border-2 border-black dark:border-white bg-transparent flex justify-center items-center text-black dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition">
                 <Plus className="w-5 h-5" />
               </button>
-              <button onClick={() => setFontSize(f => Math.max(14, f - 2))} className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-black dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+              <button onClick={() => setFontSize(f => Math.max(14, f - 2))} className="w-10 h-10 rounded-full border-2 border-black dark:border-white bg-transparent flex justify-center items-center text-black dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition">
                 <Minus className="w-5 h-5" />
               </button>
-              <button onClick={toggleBookmark} className={`w-10 h-10 rounded-full flex justify-center items-center transition ${isBookmarked ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-gray-100 dark:bg-gray-800 text-black dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+              <button onClick={toggleBookmark} className={`w-10 h-10 rounded-full border-2 border-black dark:border-white flex justify-center items-center transition ${isBookmarked ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-transparent text-black dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}`}>
                 <Bookmark className={`w-5 h-5 ${isBookmarked ? 'fill-current' : ''}`} />
-              </button>
-              <button onClick={toggleDarkMode} className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex justify-center items-center text-black dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 transition">
-                <Moon className="w-5 h-5 fill-current" />
               </button>
             </div>
             
-            {nextChapter ? (
-              <button 
-                onClick={() => navigate(`/read/${nextChapter.id}`)}
-                className="bg-black text-white dark:bg-white dark:text-black font-bold rounded-lg px-6 py-2.5 flex items-center transition hover:opacity-80"
-              >
-                Next <ChevronRight className="w-5 h-5 ml-1" />
-              </button>
-            ) : (
-              <button disabled className="bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-bold rounded-lg px-6 py-2.5 flex items-center cursor-not-allowed">
-                Next <ChevronRight className="w-5 h-5 ml-1" />
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {prevChapter ? (
+                <button 
+                  onClick={() => navigate(`/read/${prevChapter.id}`)}
+                  className="border-2 border-black dark:border-white bg-transparent text-black dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black font-bold rounded-lg px-4 py-2.5 flex items-center transition"
+                >
+                  <ChevronLeft className="w-5 h-5" /> Prev
+                </button>
+              ) : (
+                <button disabled className="border-2 border-gray-300 dark:border-gray-700 text-gray-400 font-bold rounded-lg px-4 py-2.5 flex items-center cursor-not-allowed">
+                  <ChevronLeft className="w-5 h-5" /> Prev
+                </button>
+              )}
+
+              {nextChapter ? (
+                <button 
+                  onClick={() => navigate(`/read/${nextChapter.id}`)}
+                  className="bg-black text-white dark:bg-white dark:text-black font-bold rounded-lg px-4 py-2.5 flex items-center transition hover:opacity-80 border-2 border-black dark:border-white"
+                >
+                  Next <ChevronRight className="w-5 h-5" />
+                </button>
+              ) : (
+                <button disabled className="bg-gray-300 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-700 text-gray-500 font-bold rounded-lg px-4 py-2.5 flex items-center cursor-not-allowed">
+                  Next <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            
           </div>
         </div>
 
@@ -185,6 +189,14 @@ export default function Reader() {
         >
         <div className="space-y-6">
           {contents.map((block) => {
+            if (block.type === 'image') {
+              return (
+                <div key={block.id} className="my-10 flex justify-center w-full">
+                  <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto pointer-events-none" loading="lazy" />
+                </div>
+              )
+            }
+
             if (!block.content) return null;
             
             // 1. Prevent duplication of the chapter title
@@ -202,13 +214,6 @@ export default function Reader() {
             }
             if (block.type === 'dialog') {
               return <p key={block.id} className="text-left mb-6 text-black dark:text-white">{block.content}</p>
-            }
-            if (block.type === 'image') {
-              return (
-                <div key={block.id} className="my-10 flex justify-center w-full">
-                  <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto pointer-events-none" loading="lazy" />
-                </div>
-              )
             }
             
             // 2. Format custom Bab / Chapter titles embedded within paragraphs

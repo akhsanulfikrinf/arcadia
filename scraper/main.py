@@ -246,7 +246,8 @@ def run(target_url=None):
     if not target_url:
         target_url = NOVEL_URL
         
-    if not target_url:
+    if not target_url or target_url == "ALL_FORCE":
+        is_force = (target_url == "ALL_FORCE")
         # If no specific URL provided, scrape all existing novels for updates
         conn = db_pool.getconn()
         cur = conn.cursor()
@@ -255,16 +256,16 @@ def run(target_url=None):
         cur.close()
         db_pool.putconn(conn)
         
-        print(f"Found {len(urls)} novels to update.")
+        print(f"Found {len(urls)} novels to update. Force flag: {is_force}")
         for u in urls:
             print(f"Updating novel: {u}")
-            run_single_novel(u)
+            run_single_novel(u, force=is_force)
     else:
         print(f"Scraping single novel: {target_url}")
-        run_single_novel(target_url)
+        run_single_novel(target_url, force=True)
 
 
-def run_single_novel(novel_url):
+def run_single_novel(novel_url, force=False):
     title, cover_url, chapters = get_chapters(novel_url)
     print(f"Found novel: {title} with {len(chapters)} chapters. Cover: {cover_url}")
 
@@ -276,6 +277,13 @@ def run_single_novel(novel_url):
 
     cur.execute("SELECT chapter_index FROM public.chapters c WHERE c.novel_id = %s AND EXISTS (SELECT 1 FROM public.contents cont WHERE cont.chapter_id = c.id LIMIT 1)", (novel_id,))
     completed_indices = set(row[0] for row in cur.fetchall())
+    
+    if force:
+        print(f"FORCING RE-SCRAPE: Wiping old contents for novel {title}")
+        cur.execute("DELETE FROM public.contents WHERE chapter_id IN (SELECT id FROM public.chapters WHERE novel_id = %s)", (novel_id,))
+        conn.commit()
+        completed_indices = set()
+        
     print(f"Completed chapters in DB: {len(completed_indices)}")
 
     cur.close()
