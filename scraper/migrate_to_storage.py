@@ -1,17 +1,95 @@
-"""One-time migration script: Move contents from DB to Supabase Storage.
+"""Multi-threaded migration script: Move contents from DB to Supabase Storage.
 
 Usage:
     export DATABASE_URL='postgresql://...'
-    export SUPABASE_URL='https://xxx.supabase.co'
     export SUPABASE_SERVICE_ROLE_KEY='eyJ...'
     python migrate_to_storage.py
 """
 import os
 import sys
-import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from utils.storage import SupabaseStorage
+
+NUM_WORKERS = 8
+
+
+def process_chapter(ch, db_pool, storage, counter, total, lock):
+    chapter_id = str(ch['chapter_id'])
+    novel_id = str(ch['novel_id'])
+    title = ch['title']
+
+    conn = db_pool.getconn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        # Check if already in storage
+        if storage.check_exists(novel_id, chapter_id):
+            cur.execute('UPDATE public.chapters SET is_scraped = true WHERE id = %s', (chapter_id,))
+            cur.execute('DELETE FROM public.contents WHERE chapter_id = %s', (chapter_id,))
+            conn.commit()
+            with lock:
+                counter['skipped'] += 1
+                counter['done'] += 1
+                curr = counter['done']
+            print(f"[{curr}/{total}] SKIP (already in storage): {title}")
+            return
+
+        # Fetch contents
+        cur.execute("""
+            SELECT type, content, image_url, position
+            FROM public.contents
+            WHERE chapter_id = %s
+            ORDER BY position ASC
+        """, (chapter_id,))
+        rows = cur.fetchall()
+
+        if not rows:
+            with lock:
+                counter['skipped'] += 1
+                counter['done'] += 1
+                curr = counter['done']
+            print(f"[{curr}/{total}] SKIP (empty): {title}")
+            return
+
+        blocks = []
+        for row in rows:
+            block = {'type': row['type'], 'position': row['position']}
+            if row['content']:
+                block['content'] = row['content']
+            if row['image_url']:
+                block['src'] = row['image_url']
+            blocks.append(block)
+
+        success = storage.upload_chapter(novel_id, chapter_id, blocks)
+        if success:
+            cur.execute('UPDATE public.chapters SET is_scraped = true WHERE id = %s', (chapter_id,))
+            cur.execute('DELETE FROM public.contents WHERE chapter_id = %s', (chapter_id,))
+            conn.commit()
+            with lock:
+                counter['migrated'] += 1
+                counter['done'] += 1
+                curr = counter['done']
+            print(f"[{curr}/{total}] MIGRATED: {title} ({len(blocks)} blocks)")
+        else:
+            conn.rollback()
+            with lock:
+                counter['failed'] += 1
+                counter['done'] += 1
+                curr = counter['done']
+            print(f"[{curr}/{total}] FAILED: {title}")
+    except Exception as e:
+        conn.rollback()
+        with lock:
+            counter['failed'] += 1
+            counter['done'] += 1
+            curr = counter['done']
+        print(f"[{curr}/{total}] ERROR {title}: {e}")
+    finally:
+        cur.close()
+        db_pool.putconn(conn)
 
 
 def main():
@@ -22,15 +100,18 @@ def main():
 
     storage = SupabaseStorage()
     if not storage.enabled:
-        print('ERROR: SUPABASE_SERVICE_ROLE_KEY (and optionally SUPABASE_URL) is required')
+        print('ERROR: SUPABASE_SERVICE_ROLE_KEY is required')
         sys.exit(1)
 
-    conn = psycopg2.connect(db_url)
-    conn.autocommit = False
+    db_pool = psycopg2.pool.SimpleConnectionPool(
+        1, NUM_WORKERS + 2,
+        dsn=db_url
+    )
+
+    conn = db_pool.getconn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    # 1. Get all chapters that have content in the DB
-    print('Fetching chapters with content...')
+    print('Fetching chapters with content from database...')
     cur.execute("""
         SELECT DISTINCT c.id as chapter_id, c.novel_id, c.title
         FROM public.chapters c
@@ -39,81 +120,35 @@ def main():
     """)
     chapters = cur.fetchall()
     total = len(chapters)
-    print(f'Found {total} chapters with content to migrate.\n')
+    print(f'Found {total} chapters with content to migrate.')
+    print(f'Starting multi-threaded migration with {NUM_WORKERS} workers...\n')
+
+    cur.close()
+    db_pool.putconn(conn)
 
     if total == 0:
-        print('Nothing to migrate!')
+        print('Nothing to migrate! All content has already been moved to storage.')
+        db_pool.closeall()
         return
 
-    migrated = 0
-    failed = 0
-    skipped = 0
+    counter = {'migrated': 0, 'failed': 0, 'skipped': 0, 'done': 0}
+    lock = threading.Lock()
 
-    for i, ch in enumerate(chapters):
-        chapter_id = str(ch['chapter_id'])
-        novel_id = str(ch['novel_id'])
-        title = ch['title']
-
-        progress = f'[{i+1}/{total}]'
-
-        # Check if already in storage
-        if storage.check_exists(novel_id, chapter_id):
-            print(f'{progress} SKIP (already in storage): {title}')
-            skipped += 1
-            
-            # Still mark as scraped and delete from DB since it's already migrated
-            cur.execute('UPDATE public.chapters SET is_scraped = true WHERE id = %s', (chapter_id,))
-            cur.execute('DELETE FROM public.contents WHERE chapter_id = %s', (chapter_id,))
-            conn.commit()
-            continue
-
-        # Fetch content blocks from DB
-        cur.execute("""
-            SELECT type, content, image_url, position
-            FROM public.contents
-            WHERE chapter_id = %s
-            ORDER BY position ASC
-        """, (chapter_id,))
-        rows = cur.fetchall()
-
-        if not rows:
-            print(f'{progress} SKIP (no content): {title}')
-            skipped += 1
-            continue
-
-        # Build content blocks for storage
-        blocks = []
-        for row in rows:
-            block = {'type': row['type'], 'position': row['position']}
-            if row['content']:
-                block['content'] = row['content']
-            if row['image_url']:
-                block['src'] = row['image_url']
-            blocks.append(block)
-
-        # Upload to storage
-        success = storage.upload_chapter(novel_id, chapter_id, blocks)
-
-        if success:
-            # Mark chapter as scraped and delete content from DB
-            cur.execute('UPDATE public.chapters SET is_scraped = true WHERE id = %s', (chapter_id,))
-            cur.execute('DELETE FROM public.contents WHERE chapter_id = %s', (chapter_id,))
-            conn.commit()
-            migrated += 1
-            print(f'{progress} MIGRATED: {title} ({len(blocks)} blocks)')
-        else:
-            failed += 1
-            print(f'{progress} FAILED: {title}')
-            conn.rollback()
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+        futures = [
+            executor.submit(process_chapter, ch, db_pool, storage, counter, total, lock)
+            for ch in chapters
+        ]
+        for future in as_completed(futures):
+            future.result()
 
     print(f'\n===== Migration Complete =====')
     print(f'Total chapters: {total}')
-    print(f'Migrated: {migrated}')
-    print(f'Skipped (already done): {skipped}')
-    print(f'Failed: {failed}')
+    print(f'Migrated: {counter["migrated"]}')
+    print(f'Skipped (already in storage or empty): {counter["skipped"]}')
+    print(f'Failed: {counter["failed"]}')
 
-    cur.close()
-    conn.close()
+    db_pool.closeall()
 
 
 if __name__ == '__main__':

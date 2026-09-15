@@ -12,6 +12,15 @@ $$ LANGUAGE sql SECURITY DEFINER;
 -- Current: UNIQUE(profile_id, novel_id, chapter_id) — creates new row per chapter
 -- Desired: UNIQUE(profile_id, novel_id) — tracks last chapter per novel per user
 ALTER TABLE public.reading_history DROP CONSTRAINT IF EXISTS reading_history_profile_id_novel_id_chapter_id_key;
+
+-- Deduplicate existing history keeping only the most recently updated chapter per (profile_id, novel_id)
+DELETE FROM public.reading_history
+WHERE id NOT IN (
+  SELECT DISTINCT ON (profile_id, novel_id) id
+  FROM public.reading_history
+  ORDER BY profile_id, novel_id, updated_at DESC, id
+);
+
 ALTER TABLE public.reading_history ADD CONSTRAINT reading_history_profile_id_novel_id_key UNIQUE (profile_id, novel_id);
 
 -- 3. Fix bookmarks & history RLS (currently wide open with 'Allow all access')

@@ -417,9 +417,10 @@ def run(target_url=None):
     if not target_url:
         target_url = NOVEL_URL
         
-    if not target_url or target_url == "ALL_FORCE":
+    if not target_url or target_url in ("ALL_FORCE", "ALL"):
         is_force = (target_url == "ALL_FORCE")
-        # If no specific URL provided, scrape all existing novels for updates
+        mode_str = "Full re-scrape (overwrite)" if is_force else "Smart sync (fill missing & new chapters)"
+        # If no specific URL provided or 'ALL'/'ALL_FORCE', scrape all existing novels
         conn = db_pool.getconn()
         cur = conn.cursor()
         cur.execute("SELECT url FROM public.novels")
@@ -427,7 +428,7 @@ def run(target_url=None):
         cur.close()
         db_pool.putconn(conn)
         
-        print(f"Found {len(urls)} novels to update. Force flag: {is_force}")
+        print(f"Found {len(urls)} novels to process. Mode: {mode_str}")
         for u in urls:
             try:
                 print(f"\n--- Processing: {u} ---")
@@ -436,8 +437,11 @@ def run(target_url=None):
                 print(f"SKIPPING NOVEL {u} due to error: {e}")
                 continue
     else:
-        print(f"Scraping single novel: {target_url}")
-        run_single_novel(target_url, force=True)
+        is_force = target_url.startswith("FORCE:")
+        clean_url = target_url.replace("FORCE:", "").strip()
+        mode_str = "force overwrite" if is_force else "smart sync (fill missing/new)"
+        print(f"Scraping single novel: {clean_url} [{mode_str}]")
+        run_single_novel(clean_url, force=is_force)
 
 
 def run_single_novel(novel_url, force=False):
