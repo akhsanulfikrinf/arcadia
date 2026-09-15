@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
-from utils.storage import SupabaseStorage
+from utils.storage import SupabaseStorage, clean_database_url
 
 NUM_WORKERS = 8
 
@@ -93,7 +93,7 @@ def process_chapter(ch, db_pool, storage, counter, total, lock):
 
 
 def main():
-    db_url = os.environ.get('DATABASE_URL')
+    db_url = clean_database_url(os.environ.get('DATABASE_URL', ''))
     if not db_url:
         print('ERROR: DATABASE_URL is required')
         sys.exit(1)

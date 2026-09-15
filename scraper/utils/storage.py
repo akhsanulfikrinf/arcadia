@@ -136,3 +136,51 @@ class SupabaseStorage:
         if size < 0:
             return False  # Can't determine, assume not full
         return size >= (limit_bytes * 0.9)
+
+
+def clean_database_url(raw_url: str) -> str:
+    """Sanitize, unquote, and validate PostgreSQL connection URL."""
+    if not raw_url:
+        return ""
+    
+    import re
+    url = raw_url.strip()
+    
+    # Strip quotes if wrapped: "..." or '...'
+    while (url.startswith('"') and url.endswith('"')) or (url.startswith("'") and url.endswith("'")):
+        url = url[1:-1].strip()
+    
+    # Strip 'psql ' if user copied the psql command directly from Supabase dashboard
+    if url.startswith("psql "):
+        url = url[5:].strip()
+        while (url.startswith('"') and url.endswith('"')) or (url.startswith("'") and url.endswith("'")):
+            url = url[1:-1].strip()
+
+    # Strip 'DATABASE_URL=' if user copied assignment
+    if url.startswith("DATABASE_URL="):
+        url = url[13:].strip()
+        while (url.startswith('"') and url.endswith('"')) or (url.startswith("'") and url.endswith("'")):
+            url = url[1:-1].strip()
+
+    # If password contains unescaped '#', encode it to '%23'
+    m = re.match(r'^(postgres(?:ql)?://[^:]+:)([^@]+)(@.+)$', url)
+    if m:
+        prefix, password, suffix = m.groups()
+        if '#' in password:
+            password = password.replace('#', '%23')
+            url = f"{prefix}{password}{suffix}"
+
+    # Auto-reconstruct if only password was passed in DATABASE_URL secret
+    if not (url.startswith("postgresql://") or url.startswith("postgres://")):
+        if not ("@" in url or "host=" in url or " " in url):
+            print("INFO: DATABASE_URL seems to contain only a password. Auto-reconstructing full Supabase connection string...")
+            encoded_pw = url.replace('#', '%23')
+            url = f"postgresql://postgres.nqcpkhmhozaxeyzryupk:{encoded_pw}@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+        else:
+            raise ValueError(
+                "DATABASE_URL secret is invalid: It must start with 'postgresql://'. "
+                "Format: postgresql://postgres.nqcpkhmhozaxeyzryupk:<PASSWORD>@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+            )
+
+    return url
+
