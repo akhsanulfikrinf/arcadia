@@ -107,7 +107,9 @@ export default function Admin() {
                 try {
                     const errJson = await funcError.context?.json?.();
                     if (errJson?.error) errDetail = errJson.error;
-                } catch {}
+                } catch {
+                    /* ignore json parse */
+                }
                 throw new Error(errDetail);
             }
 
@@ -117,11 +119,13 @@ export default function Admin() {
                     "Scraper triggered successfully! It may take a few minutes for chapters to appear.",
             );
             setUrl("");
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
             setStatus("error");
             setMessage(
-                err.message || "An error occurred while adding the novel.",
+                err instanceof Error
+                    ? err.message
+                    : "An error occurred while adding the novel.",
             );
         }
     };
@@ -149,7 +153,9 @@ export default function Admin() {
                 try {
                     const errJson = await funcError.context?.json?.();
                     if (errJson?.error) errDetail = errJson.error;
-                } catch {}
+                } catch {
+                    /* ignore json parse */
+                }
                 throw new Error(errDetail);
             }
 
@@ -158,10 +164,14 @@ export default function Admin() {
                 data?.message ||
                     "Sync triggered! All novels will be checked for missing and new chapters.",
             );
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
             setStatus("error");
-            setMessage(err.message || "An error occurred while syncing.");
+            setMessage(
+                err instanceof Error
+                    ? err.message
+                    : "An error occurred while syncing.",
+            );
         }
     };
 
@@ -188,7 +198,9 @@ export default function Admin() {
                 try {
                     const errJson = await funcError.context?.json?.();
                     if (errJson?.error) errDetail = errJson.error;
-                } catch {}
+                } catch {
+                    /* ignore json parse */
+                }
                 throw new Error(errDetail);
             }
 
@@ -197,10 +209,14 @@ export default function Admin() {
                 data?.message ||
                     "Full re-scrape triggered! All novels will have their chapters refreshed.",
             );
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
             setStatus("error");
-            setMessage(err.message || "An error occurred while re-scraping.");
+            setMessage(
+                err instanceof Error
+                    ? err.message
+                    : "An error occurred while re-scraping.",
+            );
         }
     };
 

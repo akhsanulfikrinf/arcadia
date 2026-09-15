@@ -3,8 +3,19 @@ import { Link } from 'react-router-dom'
 import { Bookmark, Loader2, ArrowLeft, Trash2 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface BookmarkedChapter {
+  id: string
+  title: string
+  chapter_index: number
+  novel_id: string
+  novels: {
+    title: string
+    cover_url: string
+  } | null
+}
+
 export default function Bookmarks() {
-  const [bookmarkedChapters, setBookmarkedChapters] = useState<any[]>([])
+  const [bookmarkedChapters, setBookmarkedChapters] = useState<BookmarkedChapter[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -51,7 +62,7 @@ export default function Bookmarks() {
         .in('id', bookmarkIds)
       
       if (!error && data) {
-        setBookmarkedChapters(data)
+        setBookmarkedChapters(data as unknown as BookmarkedChapter[])
       }
       setLoading(false)
     }

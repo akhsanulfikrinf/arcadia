@@ -3,17 +3,38 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Minus, Bookmark } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface Chapter {
+  id: string
+  novel_id?: string
+  title: string
+  chapter_index: number
+}
+
+interface Novel {
+  id: string
+  title: string
+  cover_url?: string | null
+}
+
+interface ContentBlock {
+  id: string
+  type: string
+  content?: string | null
+  image_url?: string | null
+  position?: number
+}
+
 export default function Reader() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [chapter, setChapter] = useState<any>(null)
-  const [contents, setContents] = useState<any[]>([])
-  const [novel, setNovel] = useState<any>(null)
-  const [allChapters, setAllChapters] = useState<any[]>([])
+  const [chapter, setChapter] = useState<Chapter | null>(null)
+  const [contents, setContents] = useState<ContentBlock[]>([])
+  const [novel, setNovel] = useState<Novel | null>(null)
+  const [allChapters, setAllChapters] = useState<Chapter[]>([])
   
   // Navigation
-  const [prevChapter, setPrevChapter] = useState<any>(null)
-  const [nextChapter, setNextChapter] = useState<any>(null)
+  const [prevChapter, setPrevChapter] = useState<Chapter | null>(null)
+  const [nextChapter, setNextChapter] = useState<Chapter | null>(null)
   
   const [loading, setLoading] = useState(true)
   const [fontSize, setFontSize] = useState(18)
@@ -104,7 +125,7 @@ export default function Reader() {
         }
         
         // Load contents: try storage first, fallback to DB
-        let loadedContents: any[] = []
+        let loadedContents: ContentBlock[] = []
         try {
           const storagePath = `novels/${chData.novel_id}/${id}.json`
           const { data: blob, error: storageErr } = await supabase.storage
@@ -112,8 +133,8 @@ export default function Reader() {
             .download(storagePath)
           
           if (blob && !storageErr) {
-            const json = JSON.parse(await blob.text())
-            loadedContents = json.map((item: any, i: number) => ({
+            const json: Array<{ type: string; content?: string; image_url?: string; position?: number }> = JSON.parse(await blob.text())
+            loadedContents = json.map((item, i) => ({
               id: `storage-${i}`,
               type: item.type,
               content: item.content || null,
@@ -121,14 +142,14 @@ export default function Reader() {
               position: item.position ?? i,
             }))
           }
-        } catch (e) {
+        } catch {
           // Storage fetch failed, will fallback to DB
         }
 
         if (loadedContents.length === 0) {
           // Fallback: load from database
           const { data: cData } = await supabase.from('contents').select('*').eq('chapter_id', id).order('position', { ascending: true })
-          loadedContents = cData || []
+          loadedContents = (cData as ContentBlock[]) || []
         }
 
         setContents(loadedContents)
@@ -251,14 +272,22 @@ export default function Reader() {
         >
         <div className="space-y-6">
           {(() => {
-            let firstTextFound = false;
             const spamPhrases = ["tolong donasinya", "klik-klik", "klik iklan", "trakteer", "donasi", "sociabuzz"];
+            const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
             
-            return contents.map((block) => {
+            const firstTextBlockIndex = contents.findIndex(b => {
+              if (b.type === 'image' || !b.content) return false;
+              if (spamPhrases.some(p => b.content!.toLowerCase().includes(p))) return false;
+              if (normalizeString(b.content) === normalizeString(chapter.title)) return false;
+              if (normalizeString(b.content) === normalizeString(novel?.title || '') + normalizeString(chapter.title)) return false;
+              return true;
+            });
+            
+            return contents.map((block, index) => {
               if (block.type === 'image') {
                 return (
                   <div key={block.id} className="my-10 flex justify-center w-full">
-                    <img src={block.image_url} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto pointer-events-none" loading="lazy" />
+                    <img src={block.image_url || ''} alt="Illustration" className="rounded-xl shadow-md max-w-full h-auto pointer-events-none" loading="lazy" />
                   </div>
                 )
               }
@@ -266,10 +295,9 @@ export default function Reader() {
               if (!block.content) return null;
               
               // 0. Filter spam (redundant check for safety)
-              if (spamPhrases.some(p => block.content.toLowerCase().includes(p))) return null;
+              if (spamPhrases.some(p => block.content!.toLowerCase().includes(p))) return null;
 
               // 1. Prevent duplication of the chapter title
-              const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
               if (normalizeString(block.content) === normalizeString(chapter.title)) {
                 return null;
               }
@@ -284,9 +312,7 @@ export default function Reader() {
               const textStr = block.content.trim();
 
               // 2. Format sub-chapters: Special handling for the very first text block
-              if (!firstTextFound && block.type !== 'image') {
-                  firstTextFound = true;
-                  
+              if (index === firstTextBlockIndex) {
                   // Look for first sentence ending with punctuation if it's short
                   // Pattern: short text followed by [.!?:] and then a space + Capital/Dialog
                   const splitMatch = textStr.match(/^(.{3,80}?[.!?:])(?:\s+([A-Z"“].*))/s);

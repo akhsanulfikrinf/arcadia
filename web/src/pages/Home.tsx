@@ -3,9 +3,30 @@ import { Link } from 'react-router-dom'
 import { Search, SortAsc, Clock, ChevronDown } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface Novel {
+  id: string
+  title: string
+  cover_url?: string | null
+  created_at: string
+}
+
+interface RecentRead {
+  novel_id: string
+  chapter_id: string
+  updated_at: string
+  novels: {
+    title: string
+    cover_url: string
+  } | null
+  chapters: {
+    title: string
+    chapter_index: number
+  } | null
+}
+
 export default function Home() {
-  const [novels, setNovels] = useState<any[]>([])
-  const [recentReads, setRecentReads] = useState<any[]>([])
+  const [novels, setNovels] = useState<Novel[]>([])
+  const [recentReads, setRecentReads] = useState<RecentRead[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('a-z')
@@ -22,7 +43,7 @@ export default function Home() {
         .from('novels')
         .select('*')
       
-      if (!nErr) setNovels(novelsData || [])
+      if (!nErr && novelsData) setNovels(novelsData as Novel[])
 
       // 2. Fetch Recent Reads
       let profileId = localStorage.getItem('arcadia_profile_id')
@@ -54,7 +75,7 @@ export default function Home() {
           .order('updated_at', { ascending: false })
           .limit(5)
         
-        if (historyData) setRecentReads(historyData)
+        if (historyData) setRecentReads(historyData as unknown as RecentRead[])
       }
 
       setLoading(false)

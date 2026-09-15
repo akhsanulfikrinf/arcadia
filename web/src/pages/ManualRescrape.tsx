@@ -3,13 +3,29 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Loader2, CheckCircle2, Search } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface NovelWithStats {
+  id: string
+  title: string
+  url: string
+  cover_url?: string | null
+  created_at: string
+  chapterCount: number
+  completedCount: number
+  lastScraped: string
+}
+
+interface StatusState {
+  type: string
+  message: string
+}
+
 export default function ManualRescrape() {
   const navigate = useNavigate()
-  const [novels, setNovels] = useState<any[]>([])
+  const [novels, setNovels] = useState<NovelWithStats[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [processingId, setProcessingId] = useState<string | null>(null)
-  const [status, setStatus] = useState<any>({ type: '', message: '' })
+  const [status, setStatus] = useState<StatusState>({ type: '', message: '' })
 
   useEffect(() => {
     async function checkAdmin() {
@@ -104,9 +120,12 @@ export default function ManualRescrape() {
       
       setStatus({ type: 'success', message: data?.message || 'Scraper triggered! Chapters will be refreshed soon.' })
       setTimeout(() => setStatus({ type: '', message: '' }), 5000)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      setStatus({ type: 'error', message: err.message || 'An error occurred.' })
+      setStatus({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'An error occurred.',
+      })
     } finally {
       setProcessingId(null)
     }
@@ -171,7 +190,7 @@ export default function ManualRescrape() {
           <div key={novel.id} className="bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700 hover:shadow-md transition">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-6">
               <div className="flex items-center gap-5 min-w-0">
-                <img src={novel.cover_url} alt="" className="w-16 h-24 object-cover rounded-xl bg-gray-100 dark:bg-gray-900 shadow-sm shrink-0" />
+                <img src={novel.cover_url || ''} alt="" className="w-16 h-24 object-cover rounded-xl bg-gray-100 dark:bg-gray-900 shadow-sm shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-bold text-lg text-black dark:text-white truncate">{novel.title}</h3>
                   <p className="text-sm text-black/50 dark:text-white/50 mb-3 flex items-center">

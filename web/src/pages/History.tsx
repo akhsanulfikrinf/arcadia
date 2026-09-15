@@ -3,8 +3,20 @@ import { Link } from 'react-router-dom'
 import { History as HistoryIcon, Loader2, ArrowLeft, Clock } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface HistoryItem {
+  id: string
+  title: string
+  cover_url: string
+  lastChapter: {
+    id: string
+    title: string
+    chapter_index: number
+  }
+  totalRead: number
+}
+
 export default function History() {
-  const [historyItems, setHistoryItems] = useState<any[]>([])
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -15,7 +27,7 @@ export default function History() {
     async function loadHistory() {
       window.scrollTo(0, 0)
       const profileId = localStorage.getItem('arcadia_profile_id')
-      let historyMap = JSON.parse(localStorage.getItem('arcadia_history') || '{}')
+      const historyMap: Record<string, string[]> = JSON.parse(localStorage.getItem('arcadia_history') || '{}')
       
       // Load from DB if possible
       if (profileId) {
@@ -70,7 +82,7 @@ export default function History() {
         }
       }))
 
-      setHistoryItems(formattedHistory.filter(h => h.lastChapter))
+      setHistoryItems(formattedHistory.filter((h): h is HistoryItem => Boolean(h.lastChapter)))
       setLoading(false)
     }
 

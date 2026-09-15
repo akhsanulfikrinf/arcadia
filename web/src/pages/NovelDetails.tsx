@@ -3,10 +3,25 @@ import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, BookOpen, Edit2, Check, X } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
+interface Novel {
+  id: string
+  title: string
+  cover_url?: string | null
+  created_at: string
+}
+
+interface Chapter {
+  id: string
+  novel_id: string
+  title: string
+  chapter_index: number
+  created_at: string
+}
+
 export default function NovelDetails() {
   const { id } = useParams()
-  const [novel, setNovel] = useState<any>(null)
-  const [chapters, setChapters] = useState<any[]>([])
+  const [novel, setNovel] = useState<Novel | null>(null)
+  const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
   const [readHistory, setReadHistory] = useState<string[]>([])
   const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({})
@@ -26,7 +41,7 @@ export default function NovelDetails() {
         .single()
         
       if (!nErr && nData) {
-        setNovel(nData)
+        setNovel(nData as Novel)
         setEditedTitle(nData.title)
         document.title = `${nData.title} - Arcadia`
       }
@@ -37,14 +52,16 @@ export default function NovelDetails() {
         .eq('novel_id', id)
         .order('chapter_index', { ascending: true })
         
-      if (!cErr) setChapters(cData || [])
+      if (!cErr && cData) setChapters(cData as Chapter[])
       
       try {
         const history = JSON.parse(localStorage.getItem('arcadia_history') || '{}')
         if (history[id]) {
           setReadHistory(history[id])
         }
-      } catch (e) {}
+      } catch {
+        /* ignore storage parse error */
+      }
 
       setLoading(false)
     }
@@ -56,7 +73,7 @@ export default function NovelDetails() {
   if (!novel) return <div className="text-center py-20 text-red-500">Novel not found.</div>
 
   // Group chapters by volume
-  const volumes: Record<string, any[]> = {}
+  const volumes: Record<string, Chapter[]> = {}
   chapters.forEach(chapter => {
     // Extract volume number from title (e.g. "Volume 1 Chapter 1" -> "Volume 1")
     let volName = "Other Chapters"
