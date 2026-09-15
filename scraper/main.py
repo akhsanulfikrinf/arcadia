@@ -4,6 +4,8 @@ import time
 import queue
 import random
 import threading
+import requests
+from html import unescape as html_unescape
 import psycopg2
 from psycopg2 import pool
 from playwright.sync_api import sync_playwright
@@ -378,70 +380,152 @@ def worker(q, novel_id):
 
 
 def get_chapters(novel_url):
+    novel_url = novel_url.strip()
+    
+    # --- Strategy 1: Direct HTTP Request (Fast, handles Madara AJAX chapters without browser overhead) ---
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+        
+        # 1. Fetch novel page for title & cover (follows redirects automatically to canonical URL)
+        r_main = requests.get(novel_url, headers=headers, timeout=20, allow_redirects=True)
+        if r_main.status_code == 200:
+            canonical_url = r_main.url
+            html_text = r_main.text
+            
+            # Title extraction
+            title = None
+            m_title = re.search(r'<div[^>]*class=["\'][^"\']*post-title[^"\']*["\'][^>]*>[\s\S]*?<h[13][^>]*>([\s\S]*?)</h[13]>', html_text)
+            if m_title:
+                title = html_unescape(re.sub(r'<[^>]+>', '', m_title.group(1)).strip())
+            if not title:
+                m_head = re.search(r'<title>([^<]+)</title>', html_text)
+                if m_head:
+                    title = html_unescape(m_head.group(1).split('-')[0].strip())
+            if not title or title == "Just a moment...":
+                title = canonical_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
+
+            # Cover extraction
+            cover_url = None
+            m_cover = re.search(r'<div[^>]*class=["\'][^"\']*summary_image[^"\']*["\'][^>]*>[\s\S]*?<img[^>]+(?:data-src|data-lazy-src|src)=["\']([^"\']+)["\']', html_text)
+            if m_cover:
+                cover_url = m_cover.group(1)
+
+            # 2. Try fetching chapters via Madara AJAX endpoint on CANONICAL URL
+            ajax_url = canonical_url.rstrip('/') + '/ajax/chapters/'
+            r_ch = requests.post(ajax_url, headers=headers, timeout=20)
+            ch_html = r_ch.text if (r_ch.status_code == 200 and len(r_ch.text) > 50) else html_text
+            
+            pattern = r'<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>'
+            matches = re.findall(pattern, ch_html)
+
+            if not matches:
+                matches = re.findall(r'<a[^>]+href=["\'](https?://[^"\']*/(?:volume|chapter)[^"\']*)["\'][^>]*>([\s\S]*?)</a>', ch_html, re.IGNORECASE)
+
+            if matches:
+                links = []
+                seen_urls = set()
+                for href, raw_t in matches:
+                    clean_t = html_unescape(re.sub(r'<[^>]+>', '', raw_t).strip())
+                    if href not in seen_urls and clean_t:
+                        seen_urls.add(href)
+                        links.append({'title': clean_t, 'url': href})
+                
+                if links:
+                    # In Madara /ajax/chapters/, newest is on top, so reverse to oldest first
+                    links.reverse()
+                    print(f"[Direct HTTP] Found {len(links)} chapters for: {title}")
+                    return title, cover_url, links
+    except Exception as e:
+        print(f"[Direct HTTP] Could not fetch chapters via HTTP ({e}), falling back to Playwright...")
+
+    # --- Strategy 2: Playwright Headless Browser (Fallback with AJAX trigger) ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        # Try navigating with a generous timeout and retries
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                # Use 'commit' for faster entry if domcontentloaded is hanging
-                wait_strategy = "domcontentloaded" if attempt == 0 else "commit"
-                timeout = 60000 if attempt == 0 else 90000
-                
-                print(f"Navigating to novel page (Attempt {attempt+1}, Strategy: {wait_strategy})...")
-                page.goto(novel_url, timeout=timeout, wait_until=wait_strategy)
-                break 
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    print(f"Fatal error navigating to {novel_url}: {e}")
-                    browser.close()
-                    raise e
-                print(f"Retry navigating to {novel_url} due to: {e}")
-                time.sleep(5)
-        
         try:
-            page.wait_for_selector('.wp-manga-chapter a', timeout=30000)
-        except Exception as e:
-            print(f"Warning: Timed out waiting for chapters to load: {e}")
-
-        # Try to get title, fallback to URL part if page title fails
-        try:
-            title = page.title().split('-')[0].strip()
-            if not title or title == "Just a moment...":
-                 # Fallback for Cloudflare or empty titles
-                 title = novel_url.split('/')[-2].replace('-', ' ').title()
-        except:
-            title = novel_url.split('/')[-2].replace('-', ' ').title()
-
-        links = page.evaluate("""
-        () => {
-            let result = [];
-            document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
-                result.push({
-                    title: a.innerText.trim(),
-                    url: a.href
-                });
-            });
-            return result.reverse(); // oldest first
-        }
-        """)
-        
-        # Get cover if available
-        cover_url = page.evaluate("""
-        () => {
-            const img = document.querySelector('.summary_image img');
-            return img ? (img.dataset.src || img.src) : null;
-        }
-        """)
-
-        browser.close()
-        
-        if not links:
-            raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
+            # Try navigating with a generous timeout and retries
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    wait_strategy = "domcontentloaded" if attempt == 0 else "commit"
+                    timeout = 60000 if attempt == 0 else 90000
+                    
+                    print(f"Navigating to novel page (Attempt {attempt+1}, Strategy: {wait_strategy})...")
+                    page.goto(novel_url, timeout=timeout, wait_until=wait_strategy)
+                    break 
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        print(f"Fatal error navigating to {novel_url}: {e}")
+                        raise e
+                    print(f"Retry navigating to {novel_url} due to: {e}")
+                    time.sleep(5)
             
-        return title, cover_url, links
+            # Trigger Madara AJAX chapter load inside page if container exists
+            try:
+                page.evaluate("""() => {
+                    const holder = document.querySelector('#manga-chapters-holder');
+                    if (holder && holder.children.length === 0) {
+                        const ajaxUrl = window.location.pathname.replace(/\\/?$/, '/ajax/chapters/');
+                        fetch(ajaxUrl, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                            .then(res => res.text())
+                            .then(html => { holder.innerHTML = html; })
+                            .catch(() => {});
+                    }
+                    window.scrollTo(0, 1000);
+                }""")
+            except Exception:
+                pass
+
+            try:
+                page.wait_for_selector('.wp-manga-chapter a', timeout=15000)
+            except Exception as e:
+                print(f"Warning: Timed out waiting for chapters to load: {e}")
+
+            # Try to get title, fallback to URL part if page title fails
+            try:
+                title = page.title().split('-')[0].strip()
+                if not title or title == "Just a moment...":
+                     title = novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
+            except:
+                title = novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
+
+            links = page.evaluate("""
+            () => {
+                let result = [];
+                let seen = new Set();
+                document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
+                    const href = a.href;
+                    const text = a.innerText.trim();
+                    if (href && text && !seen.has(href)) {
+                        seen.add(href);
+                        result.push({
+                            title: text,
+                            url: href
+                        });
+                    }
+                });
+                return result.reverse(); // oldest first
+            }
+            """)
+            
+            # Get cover if available
+            cover_url = page.evaluate("""
+            () => {
+                const img = document.querySelector('.summary_image img');
+                return img ? (img.dataset.src || img.dataset.lazySrc || img.src) : null;
+            }
+            """)
+
+            if not links:
+                raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
+                
+            return title, cover_url, links
+        finally:
+            browser.close()
 
 
 def get_or_create_novel(cur, title, url, cover_url):
