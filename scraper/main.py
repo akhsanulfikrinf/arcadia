@@ -441,10 +441,12 @@ def get_chapters(novel_url):
     except Exception as e:
         print(f"[Direct HTTP] Could not fetch chapters via HTTP ({e}), falling back to Playwright...")
 
-    # --- Strategy 2: Playwright Headless Browser (Fallback with AJAX trigger) ---
+    # --- Strategy 2: Playwright Headless Browser (Fallback with in-browser AJAX fetch) ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        page = browser.new_page(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
         
         try:
             # Try navigating with a generous timeout and retries
@@ -464,65 +466,81 @@ def get_chapters(novel_url):
                     print(f"Retry navigating to {novel_url} due to: {e}")
                     time.sleep(5)
             
-            # Trigger Madara AJAX chapter load inside page if container exists
-            try:
-                page.evaluate("""() => {
-                    const holder = document.querySelector('#manga-chapters-holder');
-                    if (holder && holder.children.length === 0) {
-                        const ajaxUrl = window.location.pathname.replace(/\\/?$/, '/ajax/chapters/');
-                        fetch(ajaxUrl, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                            .then(res => res.text())
-                            .then(html => { holder.innerHTML = html; })
-                            .catch(() => {});
-                    }
-                    window.scrollTo(0, 1000);
-                }""")
-            except Exception:
-                pass
+            # Wait 2 seconds for potential Cloudflare redirect
+            time.sleep(2)
 
-            try:
-                page.wait_for_selector('.wp-manga-chapter a', timeout=15000)
-            except Exception as e:
-                print(f"Warning: Timed out waiting for chapters to load: {e}")
+            # In-browser extraction with native async fetch & DOMParser (passes Cloudflare cookies!)
+            extracted = page.evaluate("""async () => {
+                // 1. Title
+                let title = '';
+                const titleEl = document.querySelector('.post-title h1, .post-title h3, h1');
+                if (titleEl && titleEl.innerText.trim()) {
+                    title = titleEl.innerText.trim();
+                } else {
+                    title = document.title.split('-')[0].trim();
+                }
 
-            # Try to get title, fallback to URL part if page title fails
-            try:
-                title = page.title().split('-')[0].strip()
-                if not title or title == "Just a moment...":
-                     title = novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
-            except:
-                title = novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
-
-            links = page.evaluate("""
-            () => {
-                let result = [];
-                let seen = new Set();
-                document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
-                    const href = a.href;
-                    const text = a.innerText.trim();
-                    if (href && text && !seen.has(href)) {
-                        seen.add(href);
-                        result.push({
-                            title: text,
-                            url: href
-                        });
-                    }
-                });
-                return result.reverse(); // oldest first
-            }
-            """)
-            
-            # Get cover if available
-            cover_url = page.evaluate("""
-            () => {
+                // 2. Cover
+                let cover_url = null;
                 const img = document.querySelector('.summary_image img');
-                return img ? (img.dataset.src || img.dataset.lazySrc || img.src) : null;
-            }
-            """)
+                if (img) {
+                    cover_url = img.dataset.src || img.dataset.lazySrc || img.src;
+                }
+
+                // 3. Chapters via in-browser AJAX fetch (runs in browser context with session cookies)
+                let chapters = [];
+                try {
+                    let ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
+                    let resp = await fetch(ajaxUrl, {
+                        method: 'POST',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                    if (resp.status === 200) {
+                        let html = await resp.text();
+                        let parser = new DOMParser();
+                        let doc = parser.parseFromString(html, 'text/html');
+                        let seen = new Set();
+                        doc.querySelectorAll('.wp-manga-chapter a').forEach(a => {
+                            let h = a.href;
+                            let t = a.innerText.trim();
+                            if (h && t && !seen.has(h)) {
+                                seen.add(h);
+                                chapters.push({ title: t, url: h });
+                            }
+                        });
+                        if (chapters.length > 0) {
+                            chapters.reverse();
+                        }
+                    }
+                } catch(e) {}
+
+                // 4. Fallback: inspect DOM directly if chapters are already present in page
+                if (chapters.length === 0) {
+                    let seen = new Set();
+                    document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
+                        let h = a.href;
+                        let t = a.innerText.trim();
+                        if (h && t && !seen.has(h)) {
+                            seen.add(h);
+                            chapters.push({ title: t, url: h });
+                        }
+                    });
+                    if (chapters.length > 0) {
+                        chapters.reverse();
+                    }
+                }
+
+                return { title, cover_url, chapters };
+            }""")
+
+            title = extracted.get('title') or novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
+            cover_url = extracted.get('cover_url')
+            links = extracted.get('chapters') or []
 
             if not links:
                 raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
                 
+            print(f"[Playwright In-Browser] Successfully extracted {len(links)} chapters for: {title}")
             return title, cover_url, links
         finally:
             browser.close()
