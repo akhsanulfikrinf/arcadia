@@ -10,9 +10,20 @@ import ManualRescrape from './pages/ManualRescrape'
 import Bookmarks from './pages/Bookmarks'
 import HistoryPage from './pages/History'
 
+import type { Session } from '@supabase/supabase-js'
+
+export interface UserProfile {
+  id: string
+  username: string
+  display_name?: string
+  email: string
+  is_admin?: boolean
+  auth_id?: string
+}
+
 function App() {
-  const [session, setSession] = useState<any>(null)
-  const [userProfile, setUserProfile] = useState<any>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   
   // Auth Form State
@@ -114,8 +125,8 @@ function App() {
         setAuthError('Registration successful! Please sign in.')
         setAuthMode('login')
       }
-    } catch (err: any) {
-      setAuthError(err.message)
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : 'An unexpected authentication error occurred.')
     } finally {
       setIsAuthLoading(false)
     }

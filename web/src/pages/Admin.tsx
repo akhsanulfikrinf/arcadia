@@ -10,7 +10,10 @@ import {
     Sparkles,
 } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { getSmartRecommendations, type NovelRecommendation } from "../data/novelRecommendations";
+import {
+    getSmartRecommendations,
+    type NovelRecommendation,
+} from "../data/novelRecommendations";
 
 export default function Admin() {
     const navigate = useNavigate();
@@ -20,7 +23,9 @@ export default function Admin() {
     >("idle");
     const [message, setMessage] = useState("");
 
-    const [recommendations, setRecommendations] = useState<NovelRecommendation[]>([]);
+    const [recommendations, setRecommendations] = useState<
+        NovelRecommendation[]
+    >([]);
     const [selectedGenre, setSelectedGenre] = useState<string>("All");
 
     useEffect(() => {
@@ -97,7 +102,14 @@ export default function Admin() {
                 },
             );
 
-            if (funcError) throw funcError;
+            if (funcError) {
+                let errDetail = funcError.message;
+                try {
+                    const errJson = await funcError.context?.json?.();
+                    if (errJson?.error) errDetail = errJson.error;
+                } catch {}
+                throw new Error(errDetail);
+            }
 
             setStatus("success");
             setMessage(
@@ -132,7 +144,14 @@ export default function Admin() {
                 },
             );
 
-            if (funcError) throw funcError;
+            if (funcError) {
+                let errDetail = funcError.message;
+                try {
+                    const errJson = await funcError.context?.json?.();
+                    if (errJson?.error) errDetail = errJson.error;
+                } catch {}
+                throw new Error(errDetail);
+            }
 
             setStatus("success");
             setMessage(
@@ -164,7 +183,14 @@ export default function Admin() {
                 },
             );
 
-            if (funcError) throw funcError;
+            if (funcError) {
+                let errDetail = funcError.message;
+                try {
+                    const errJson = await funcError.context?.json?.();
+                    if (errJson?.error) errDetail = errJson.error;
+                } catch {}
+                throw new Error(errDetail);
+            }
 
             setStatus("success");
             setMessage(
@@ -221,7 +247,9 @@ export default function Admin() {
                                 <div className="flex items-center space-x-2">
                                     <Sparkles className="w-4 h-4 text-amber-500" />
                                     <span className="text-sm font-bold text-black dark:text-white">
-                                        Smart Novel Recommendations ({recommendations.length} new titles to scrape):
+                                        Smart Novel Recommendations (
+                                        {recommendations.length} new titles to
+                                        scrape):
                                     </span>
                                 </div>
                                 <span className="text-xs text-black/50 dark:text-white/50 hidden sm:inline">
@@ -255,13 +283,16 @@ export default function Admin() {
                             </div>
 
                             {/* Recommendations Card Grid */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-95 overflow-y-auto pr-1">
                                 {filteredRecs.map((rec, i) => (
                                     <div
                                         key={i}
                                         onClick={() => {
                                             setUrl(rec.url);
-                                            window.scrollTo({ top: 120, behavior: "smooth" });
+                                            window.scrollTo({
+                                                top: 120,
+                                                behavior: "smooth",
+                                            });
                                         }}
                                         className={`group cursor-pointer p-3.5 rounded-2xl border transition flex flex-col justify-between ${
                                             url === rec.url
@@ -275,7 +306,9 @@ export default function Admin() {
                                                     {rec.title}
                                                 </span>
                                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-black/70 dark:text-white/70 shrink-0">
-                                                    {rec.genre.split("&")[0].trim()}
+                                                    {rec.genre
+                                                        .split("&")[0]
+                                                        .trim()}
                                                 </span>
                                             </div>
                                             <p className="text-[11px] text-black/60 dark:text-white/60 line-clamp-2 leading-relaxed mb-2.5">
@@ -285,7 +318,8 @@ export default function Admin() {
 
                                         <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700/60 mt-auto">
                                             <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium truncate max-w-[70%]">
-                                                💡 Based on: {rec.basedOn.split(",")[0]}
+                                                💡 Based on:{" "}
+                                                {rec.basedOn.split(",")[0]}
                                             </span>
                                             <span className="text-[10px] font-bold text-black dark:text-white group-hover:translate-x-0.5 transition-transform">
                                                 Auto-fill ➜
