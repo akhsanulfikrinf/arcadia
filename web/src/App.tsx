@@ -309,7 +309,7 @@ function App() {
         
         <footer className="bg-white dark:bg-black border-t border-gray-200 dark:border-gray-800 py-6 mt-auto">
           <div className="max-w-5xl mx-auto px-4 text-center text-sm text-black dark:text-white">
-            <p>Arcadia &copy; {new Date().getFullYear()}</p>
+            <span>Arcadia &copy; {new Date().getFullYear()} by <a href="https://www.instagram.com/zeta.devs/" rel="noopener noreferrer" target="_blank">Zeta Dev</a></span>
           </div>
         </footer>
       </div>

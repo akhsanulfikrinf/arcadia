@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
     ArrowLeft,
@@ -7,8 +7,10 @@ import {
     CheckCircle2,
     RefreshCw,
     ListTree,
+    Sparkles,
 } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { getSmartRecommendations, type NovelRecommendation } from "../data/novelRecommendations";
 
 export default function Admin() {
     const navigate = useNavigate();
@@ -18,7 +20,8 @@ export default function Admin() {
     >("idle");
     const [message, setMessage] = useState("");
 
-    const [recommendations, setRecommendations] = useState<any[]>([]);
+    const [recommendations, setRecommendations] = useState<NovelRecommendation[]>([]);
+    const [selectedGenre, setSelectedGenre] = useState<string>("All");
 
     useEffect(() => {
         document.title = "Admin Dashboard - Arcadia";
@@ -52,16 +55,20 @@ export default function Admin() {
             window.scrollTo(0, 0);
             const { data, error } = await supabase
                 .from("novels")
-                .select("title, url")
-                .order("created_at", { ascending: false })
-                .limit(4);
+                .select("title, url");
             if (data && !error) {
-                setRecommendations(data);
+                const smartRecs = getSmartRecommendations(data);
+                setRecommendations(smartRecs);
             }
         }
 
         checkAdmin();
     }, [navigate]);
+
+    const filteredRecs = useMemo(() => {
+        if (selectedGenre === "All") return recommendations;
+        return recommendations.filter((r) => r.genre === selectedGenre);
+    }, [recommendations, selectedGenre]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -209,20 +216,82 @@ export default function Admin() {
                     </div>
 
                     {recommendations.length > 0 && (
-                        <div className="mb-6">
-                            <span className="text-sm font-medium text-black/70 dark:text-white/70 mb-2 block">
-                                Quick Recommendations (Re-scrape added novels):
-                            </span>
-                            <div className="flex flex-wrap gap-2">
-                                {recommendations.map((rec, i) => (
+                        <div className="mb-8 pt-2">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center space-x-2">
+                                    <Sparkles className="w-4 h-4 text-amber-500" />
+                                    <span className="text-sm font-bold text-black dark:text-white">
+                                        Smart Novel Recommendations ({recommendations.length} new titles to scrape):
+                                    </span>
+                                </div>
+                                <span className="text-xs text-black/50 dark:text-white/50 hidden sm:inline">
+                                    Click title to auto-fill URL
+                                </span>
+                            </div>
+
+                            {/* Genre Filter Tabs */}
+                            <div className="flex flex-wrap gap-1.5 mb-4">
+                                {[
+                                    "All",
+                                    "Isekai & Fantasy",
+                                    "Psychological",
+                                    "Mystery & Historical",
+                                    "Rom-Com & Slice of Life",
+                                    "Action & Dungeon",
+                                ].map((g) => (
                                     <button
-                                        key={i}
+                                        key={g}
                                         type="button"
-                                        onClick={() => setUrl(rec.url)}
-                                        className="px-3 py-1.5 bg-black text-white dark:bg-white dark:text-black rounded-lg text-sm hover:opacity-80 transition truncate max-w-[200px]"
+                                        onClick={() => setSelectedGenre(g)}
+                                        className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition ${
+                                            selectedGenre === g
+                                                ? "bg-black text-white dark:bg-white dark:text-black shadow-sm"
+                                                : "bg-gray-100 text-black/70 hover:bg-gray-200 dark:bg-gray-800 dark:text-white/70 dark:hover:bg-gray-700"
+                                        }`}
                                     >
-                                        {rec.title}
+                                        {g}
                                     </button>
+                                ))}
+                            </div>
+
+                            {/* Recommendations Card Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                                {filteredRecs.map((rec, i) => (
+                                    <div
+                                        key={i}
+                                        onClick={() => {
+                                            setUrl(rec.url);
+                                            window.scrollTo({ top: 120, behavior: "smooth" });
+                                        }}
+                                        className={`group cursor-pointer p-3.5 rounded-2xl border transition flex flex-col justify-between ${
+                                            url === rec.url
+                                                ? "border-black dark:border-white bg-gray-50 dark:bg-gray-900 ring-2 ring-black/10 dark:ring-white/10"
+                                                : "border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-800/40 hover:border-black/50 dark:hover:border-white/50 hover:shadow-sm"
+                                        }`}
+                                    >
+                                        <div>
+                                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                <span className="text-xs font-bold text-black dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition line-clamp-1">
+                                                    {rec.title}
+                                                </span>
+                                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-black/70 dark:text-white/70 shrink-0">
+                                                    {rec.genre.split("&")[0].trim()}
+                                                </span>
+                                            </div>
+                                            <p className="text-[11px] text-black/60 dark:text-white/60 line-clamp-2 leading-relaxed mb-2.5">
+                                                {rec.description}
+                                            </p>
+                                        </div>
+
+                                        <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700/60 mt-auto">
+                                            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium truncate max-w-[70%]">
+                                                💡 Based on: {rec.basedOn.split(",")[0]}
+                                            </span>
+                                            <span className="text-[10px] font-bold text-black dark:text-white group-hover:translate-x-0.5 transition-transform">
+                                                Auto-fill ➜
+                                            </span>
+                                        </div>
+                                    </div>
                                 ))}
                             </div>
                         </div>
