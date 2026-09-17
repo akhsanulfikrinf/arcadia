@@ -59,7 +59,7 @@ def clean_database_url(raw_url: str) -> str:
 # Configuration from environment variables
 DATABASE_URL = clean_database_url(os.environ.get("DATABASE_URL", ""))
 NOVEL_URL = os.environ.get("NOVEL_URL") # Provided via GitHub Actions dispatch
-WORKERS = 3
+WORKERS = 2  # 2 workers prevents Cloudflare concurrent session flagging
 BATCH_SIZE = 5
 
 # Configure Database Pool
@@ -155,97 +155,138 @@ def smart_split(blocks):
     return result
 
 
-def scrape_chapter(page, url):
-    # Safe navigation with retries
-    max_retries = 3
+def extract_blocks_from_html(html_text):
+    """Parse .reading-content from HTML and return structured blocks."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html_text, 'html.parser')
+    container = soup.select_one('.reading-content')
+    if not container:
+        return []
+
     blocks = []
-    
+    def walk(node):
+        if not node:
+            return
+        if getattr(node, 'name', None) in ['script', 'style', 'iframe', 'noscript', 'a']:
+            return
+            
+        if getattr(node, 'name', None) == 'img':
+            src = node.get('data-src') or node.get('data-lazy-src') or node.get('src')
+            if src and 'base64' not in src:
+                blocks.append({'type': 'image', 'src': src})
+            return
+            
+        if getattr(node, 'name', None) in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+            t = node.get_text().strip()
+            if t:
+                blocks.append({'type': 'title', 'content': t})
+            return
+            
+        if getattr(node, 'name', None) == 'p':
+            imgs = node.find_all('img')
+            if imgs:
+                for child in node.children:
+                    if hasattr(child, 'name') and child.name:
+                        walk(child)
+                    else:
+                        t = str(child).strip()
+                        if t and len(t) > 1:
+                            blocks.append({'type': 'text', 'content': t})
+            else:
+                t = node.get_text().strip()
+                if t:
+                    blocks.append({'type': 'text', 'content': t})
+            return
+            
+        for child in getattr(node, 'children', []):
+            if hasattr(child, 'name') and child.name:
+                walk(child)
+            else:
+                t = str(child).strip()
+                if t and len(t) > 1:
+                    blocks.append({'type': 'text', 'content': t})
+
+    walk(container)
+    return smart_split(blocks) if blocks else []
+
+
+def scrape_chapter(page, url):
+    # --- Strategy 1: Direct HTTP via requests (Fast 0.3s, immune to headless browser Cloudflare blocks) ---
+    try:
+        time.sleep(random.uniform(0.4, 1.0))
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 200 and 'reading-content' in r.text and 'Just a moment' not in r.text:
+            blocks = extract_blocks_from_html(r.text)
+            if blocks and len(blocks) > 0:
+                return blocks
+    except Exception:
+        pass
+
+    # --- Strategy 2: Playwright fallback (Short timeout, NO networkidle hang) ---
+    max_retries = 2
     for attempt in range(max_retries):
         try:
-            # Random wait before each chapter to mimic human reading speed
-            time.sleep(random.uniform(2.0, 5.0))
+            time.sleep(random.uniform(1.0, 2.0))
+            page.goto(url, timeout=30000, wait_until="domcontentloaded")
             
-            # Use domcontentloaded for first attempt, then try alternatives
-            wait_strat = "domcontentloaded" if attempt == 0 else "networkidle"
-            page.goto(url, timeout=90000, wait_until=wait_strat)
-            
-            # Ensure we aren't stuck on a Cloudflare challenge
+            # Check if Cloudflare is challenging
+            if "Just a moment" in page.title():
+                time.sleep(6) # Brief wait for Turnstile auto-pass
+                
             try:
-                page.wait_for_selector('.reading-content', timeout=20000)
+                page.wait_for_selector('.reading-content', timeout=15000)
             except:
-                print(f"Warning: .reading-content not found on attempt {attempt+1}. Title: {page.title()}")
-                # If we see Cloudflare titles, we might need a longer wait or manual bypass isn't possible here
-                if "Just a moment" in page.title():
-                    time.sleep(10) # Wait for potential auto-redirect
                 continue
 
             blocks = page.evaluate("""
             () => {
                 const container = document.querySelector('.reading-content');
                 if (!container) return [];
-                
                 let result = [];
                 function walk(node) {
-            // Check if node is an image
-            if (node.nodeName === 'IMG') {
-                let src = node.dataset.src || node.dataset.lazySrc || node.src;
-                if (src && !src.includes('base64')) {
-                    result.push({type:'image', src: src});
+                    if (node.nodeName === 'IMG') {
+                        let src = node.dataset.src || node.dataset.lazySrc || node.src;
+                        if (src && !src.includes('base64')) result.push({type:'image', src: src});
+                        return;
+                    }
+                    if (/^H[1-6]$/.test(node.nodeName)) {
+                        let t = node.textContent.trim();
+                        if (t) result.push({type:'title', content: t});
+                        return;
+                    }
+                    if (node.nodeName === 'P') {
+                        if (node.children.length === 0) {
+                            let t = node.textContent.trim();
+                            if (t) result.push({type:'text', content: t});
+                        } else {
+                            node.childNodes.forEach(walk);
+                        }
+                        return;
+                    }
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        let t = node.textContent.trim();
+                        if (t && t.length > 1) result.push({type:'text', content: t});
+                        return;
+                    }
+                    if (node.childNodes && node.childNodes.length > 0) {
+                        const ignoredTags = ['SCRIPT', 'STYLE', 'IFRAME', 'NOSCRIPT', 'A'];
+                        if (!ignoredTags.includes(node.nodeName)) node.childNodes.forEach(walk);
+                    }
                 }
-                return;
+                walk(container);
+                return result;
             }
-
-            // Check if node is a heading
-            if (/^H[1-6]$/.test(node.nodeName)) {
-                let t = node.textContent.trim();
-                if (t) result.push({type:'title', content: t});
-                return;
-            }
-
-            // Check if node is a paragraph (might contain child text or images)
-            if (node.nodeName === 'P') {
-                // If it's a simple text paragraph, just add it
-                if (node.children.length === 0) {
-                    let t = node.textContent.trim();
-                    if (t) result.push({type:'text', content: t});
-                } else {
-                    // If it has children (like images or spans), walk through them to preserve order
-                    node.childNodes.forEach(walk);
-                }
-                return;
-            }
-
-            // Handle pure text nodes
-            if (node.nodeType === Node.TEXT_NODE) {
-                let t = node.textContent.trim();
-                if (t && t.length > 1) {
-                    result.push({type:'text', content: t});
-                }
-                return;
-            }
-
-            // For other containers (divs, sections), recurse into children
-            if (node.childNodes && node.childNodes.length > 0) {
-                const ignoredTags = ['SCRIPT', 'STYLE', 'IFRAME', 'NOSCRIPT', 'A'];
-                if (!ignoredTags.includes(node.nodeName)) {
-                    node.childNodes.forEach(walk);
-                }
-            }
-        }
-
-        walk(container);
-        return result;
-    }
-    """)
-            
+            """)
             if blocks and len(blocks) > 0:
                 return smart_split(blocks)
-                
         except Exception as e:
-            print(f"Attempt {attempt+1} failed for {url}: {e}")
             if attempt == max_retries - 1:
                 return []
-            
     return []
 
 
@@ -599,19 +640,32 @@ def run_single_novel(novel_url, force=False):
     cur = conn.cursor()
 
     novel_id = get_or_create_novel(cur, title, novel_url, cover_url)
+    
+    # 1. Register all chapters upfront so DB and Admin UI immediately reflect the true chapter count (e.g. 110)
+    cur.executemany(
+        """
+        INSERT INTO public.chapters (novel_id, title, chapter_index, is_scraped)
+        VALUES (%s, %s, %s, false)
+        ON CONFLICT (novel_id, chapter_index) DO UPDATE
+        SET title = EXCLUDED.title
+        """,
+        [(novel_id, ch["title"], i + 1) for i, ch in enumerate(chapters)]
+    )
     conn.commit()
 
-    # Check which chapters already have content in DB or Storage
-    cur.execute("""
-        SELECT chapter_index FROM public.chapters 
-        WHERE novel_id = %s 
-          AND (is_scraped = true OR EXISTS (SELECT 1 FROM public.contents cont WHERE cont.chapter_id = chapters.id LIMIT 1))
-    """, (novel_id,))
-    completed_indices = set(row[0] for row in cur.fetchall())
-    
     if force:
         print(f"FORCING RE-SCRAPE: Overwriting contents for novel {title}.")
+        cur.execute("UPDATE public.chapters SET is_scraped = false WHERE novel_id = %s", (novel_id,))
+        conn.commit()
         completed_indices = set()
+    else:
+        # Check which chapters already have content in DB or Storage
+        cur.execute("""
+            SELECT chapter_index FROM public.chapters 
+            WHERE novel_id = %s 
+              AND (is_scraped = true OR EXISTS (SELECT 1 FROM public.contents cont WHERE cont.chapter_id = chapters.id LIMIT 1))
+        """, (novel_id,))
+        completed_indices = set(row[0] for row in cur.fetchall())
         
     print(f"Completed chapters: {len(completed_indices)} / {len(chapters)}")
 
