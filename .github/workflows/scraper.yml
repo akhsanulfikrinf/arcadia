@@ -11,6 +11,10 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: novel-scraper
+  cancel-in-progress: true
+
 jobs:
   scrape:
     runs-on: ubuntu-latest

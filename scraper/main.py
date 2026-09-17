@@ -11,6 +11,11 @@ from psycopg2 import pool
 from playwright.sync_api import sync_playwright
 from utils.storage import SupabaseStorage
 
+try:
+    from curl_cffi import requests as cffi_requests
+except ImportError:
+    import requests as cffi_requests
+
 def clean_database_url(raw_url: str) -> str:
     """Sanitize, unquote, and validate PostgreSQL connection URL."""
     if not raw_url:
@@ -211,15 +216,10 @@ def extract_blocks_from_html(html_text):
 
 
 def scrape_chapter(page, url):
-    # --- Strategy 1: Direct HTTP via requests (Fast 0.3s, immune to headless browser Cloudflare blocks) ---
+    # --- Strategy 1: Direct HTTP via curl_cffi (Chrome 120 TLS Impersonation, immune to Cloudflare) ---
     try:
-        time.sleep(random.uniform(0.4, 1.0))
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-        }
-        r = requests.get(url, headers=headers, timeout=15)
+        time.sleep(random.uniform(0.4, 0.9))
+        r = cffi_requests.get(url, impersonate="chrome120", timeout=20)
         if r.status_code == 200 and 'reading-content' in r.text and 'Just a moment' not in r.text:
             blocks = extract_blocks_from_html(r.text)
             if blocks and len(blocks) > 0:
@@ -319,7 +319,9 @@ def db_writer():
 
 def flush_batch(cur, batch):
     all_rows = []
+    chapter_ids = []
     for chapter_id, blocks in batch:
+        chapter_ids.append(chapter_id)
         for pos, b in enumerate(blocks):
             all_rows.append((
                 chapter_id,
@@ -332,6 +334,10 @@ def flush_batch(cur, batch):
         cur.executemany(
             "INSERT INTO public.contents(chapter_id, type, content, image_url, position) VALUES(%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
             all_rows
+        )
+        cur.execute(
+            "UPDATE public.chapters SET is_scraped = true WHERE id = ANY(%s)",
+            (chapter_ids,)
         )
 
 
@@ -365,9 +371,9 @@ def worker(q, novel_id):
                 blocks = scrape_chapter(page, ch["url"])
                 
                 if blocks and len(blocks) > 0:
-                    # Upsert chapter metadata (always goes to DB — it's small)
+                    # Upsert chapter metadata (without marking is_scraped yet)
                     cur.execute(
-                        "INSERT INTO public.chapters(novel_id, title, chapter_index, is_scraped) VALUES(%s, %s, %s, true) ON CONFLICT (novel_id, chapter_index) DO UPDATE SET title = EXCLUDED.title, is_scraped = true RETURNING id",
+                        "INSERT INTO public.chapters(novel_id, title, chapter_index) VALUES(%s, %s, %s) ON CONFLICT (novel_id, chapter_index) DO UPDATE SET title = EXCLUDED.title RETURNING id",
                         (novel_id, ch["title"], idx)
                     )
                     res = cur.fetchone()
@@ -385,11 +391,13 @@ def worker(q, novel_id):
                         saved_to_storage = storage.upload_chapter(str(novel_id), cid, blocks)
                     
                     if saved_to_storage:
-                        # Content is in storage — clean up any old DB content for this chapter
+                        # Content is in storage — clean up DB contents and mark is_scraped = true
                         cur.execute("DELETE FROM public.contents WHERE chapter_id = %s", (cid,))
+                        cur.execute("UPDATE public.chapters SET is_scraped = true WHERE id = %s", (cid,))
                         conn.commit()
                         with stats_lock:
                             stats['storage_saved'] += 1
+                            stats['scraped'] += 1
                         print(f"SUCCESS (STORAGE): [{idx}] {ch['title']} ({len(blocks)} blocks)")
                     else:
                         # Storage unavailable/full — save to DB instead
@@ -398,10 +406,8 @@ def worker(q, novel_id):
                         insert_queue.put((cid, blocks))
                         with stats_lock:
                             stats['db_saved'] += 1
+                            stats['scraped'] += 1
                         print(f"SUCCESS (DB): [{idx}] {ch['title']} ({len(blocks)} blocks)")
-                    
-                    with stats_lock:
-                        stats['scraped'] += 1
                 else:
                     with stats_lock:
                         stats['skipped'] += 1
@@ -423,17 +429,12 @@ def worker(q, novel_id):
 def get_chapters(novel_url):
     novel_url = novel_url.strip()
     
-    # --- Strategy 1: Direct HTTP Request (Fast, handles Madara AJAX chapters without browser overhead) ---
+    # --- Strategy 1: Direct HTTP Request via curl_cffi (Fast, TLS browser impersonation, immune to Cloudflare) ---
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-        
         # 1. Fetch novel page for title & cover (follows redirects automatically to canonical URL)
-        r_main = requests.get(novel_url, headers=headers, timeout=20, allow_redirects=True)
+        r_main = cffi_requests.get(novel_url, impersonate="chrome120", timeout=20)
         if r_main.status_code == 200:
-            canonical_url = r_main.url
+            canonical_url = str(r_main.url)
             html_text = r_main.text
             
             # Title extraction
@@ -456,7 +457,7 @@ def get_chapters(novel_url):
 
             # 2. Try fetching chapters via Madara AJAX endpoint on CANONICAL URL
             ajax_url = canonical_url.rstrip('/') + '/ajax/chapters/'
-            r_ch = requests.post(ajax_url, headers=headers, timeout=20)
+            r_ch = cffi_requests.post(ajax_url, impersonate="chrome120", headers={'X-Requested-With': 'XMLHttpRequest'}, timeout=20)
             ch_html = r_ch.text if (r_ch.status_code == 200 and len(r_ch.text) > 50) else html_text
             
             pattern = r'<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>'
