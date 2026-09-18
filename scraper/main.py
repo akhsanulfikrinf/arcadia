@@ -362,7 +362,7 @@ def flush_batch(cur, batch):
             all_rows
         )
         cur.execute(
-            "UPDATE public.chapters SET is_scraped = true WHERE id = ANY(%s)",
+            "UPDATE public.chapters SET is_scraped = true WHERE id = ANY(%s::uuid[])",
             (chapter_ids,)
         )
 
