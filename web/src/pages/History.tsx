@@ -154,7 +154,7 @@ export default function History() {
                             className="bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700 hover:shadow-md transition flex flex-col sm:flex-row items-start sm:items-center gap-6"
                         >
                             <Link to={`/novel/${item.id}`} className="shrink-0">
-                                <img
+                                <img referrerPolicy="no-referrer"
                                     src={item.cover_url}
                                     alt=""
                                     className="w-24 h-36 object-cover rounded-xl shadow-sm hover:opacity-80 transition"

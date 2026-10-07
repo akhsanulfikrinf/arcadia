@@ -259,7 +259,7 @@ export default function ManualRescrape() {
                     >
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-6">
                             <div className="flex items-center gap-5 min-w-0">
-                                <img
+                                <img referrerPolicy="no-referrer"
                                     src={novel.cover_url || ""}
                                     alt=""
                                     className="w-16 h-24 object-cover rounded-xl bg-gray-100 dark:bg-gray-900 shadow-sm shrink-0"

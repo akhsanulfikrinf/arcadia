@@ -147,7 +147,7 @@ export default function Bookmarks() {
                             to={`/read/${ch.id}`}
                             className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 hover:shadow-md transition group flex items-center gap-4"
                         >
-                            <img
+                            <img referrerPolicy="no-referrer"
                                 src={ch.novels?.cover_url}
                                 alt=""
                                 className="w-12 h-16 object-cover rounded-lg bg-gray-100 dark:bg-gray-900 shrink-0"

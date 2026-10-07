@@ -430,7 +430,7 @@ export default function Reader() {
                                             key={block.id}
                                             className="my-10 flex justify-center w-full"
                                         >
-                                            <img
+                                            <img referrerPolicy="no-referrer"
                                                 src={block.image_url || ""}
                                                 alt="Illustration"
                                                 className="rounded-xl shadow-md max-w-full h-auto pointer-events-none"

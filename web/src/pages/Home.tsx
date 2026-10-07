@@ -133,7 +133,7 @@ export default function Home() {
                                 to={`/read/${read.chapter_id}`}
                                 className="flex-shrink-0 w-64 bg-white dark:bg-gray-800 rounded-2xl p-3 flex gap-3 border border-gray-100 dark:border-gray-700 hover:shadow-md transition group"
                             >
-                                <img
+                                <img referrerPolicy="no-referrer"
                                     src={read.novels?.cover_url}
                                     alt=""
                                     className="w-14 h-20 object-cover rounded-lg bg-gray-100 dark:bg-gray-900 shadow-sm"
@@ -228,7 +228,7 @@ export default function Home() {
                             <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-lg transition">
                                 <div className="aspect-[2/3] bg-gray-200 dark:bg-gray-900 relative">
                                     {novel.cover_url ? (
-                                        <img
+                                        <img referrerPolicy="no-referrer"
                                             src={novel.cover_url}
                                             alt={novel.title}
                                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
