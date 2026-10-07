@@ -4,3 +4,4 @@ requests
 supabase
 beautifulsoup4
 curl_cffi
+playwright-stealth

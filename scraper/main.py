@@ -21,7 +21,8 @@ try:
     from curl_cffi import requests as cffi_requests
     CFFI_AVAILABLE = True
     # Test which impersonate profiles are available
-    for profile in ["chrome", "chrome120", "chrome110", "chrome100"]:
+    # Sometimes edge or safari bypasses CF better than chrome on datacenter IPs
+    for profile in ["chrome120", "edge99", "safari15_5", "chrome110", "chrome"]:
         try:
             cffi_session = cffi_requests.Session(impersonate=profile)
             CFFI_IMPERSONATE = profile
@@ -540,7 +541,15 @@ def get_chapters(novel_url):
                 time.sleep(backoff)
 
     # --- Strategy 2: Playwright Headless Browser (Fallback with Cloudflare bypass) ---
-    print("[get_chapters] Falling back to Playwright...")
+    print("[get_chapters] Falling back to Playwright with stealth...")
+    
+    try:
+        from playwright_stealth import stealth_sync
+        HAS_STEALTH = True
+    except ImportError:
+        HAS_STEALTH = False
+        print("WARNING: playwright-stealth not found. CF bypass may fail.")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -555,11 +564,9 @@ def get_chapters(novel_url):
             viewport={'width': 1920, 'height': 1080},
             locale='en-US',
         )
-        # Remove webdriver flag
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        """)
         page = context.new_page()
+        if HAS_STEALTH:
+            stealth_sync(page)
         
         try:
             # Try navigating with retries
