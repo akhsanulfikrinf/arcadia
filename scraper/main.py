@@ -444,96 +444,168 @@ def worker(q, novel_id):
 def get_chapters(novel_url):
     novel_url = novel_url.strip()
     
-    # --- Strategy 1: curl_cffi with TLS browser impersonation ---
-    try:
-        print(f"[get_chapters] Trying curl_cffi (impersonate={CFFI_IMPERSONATE})...")
-        r_main = cffi_get(novel_url, timeout=20)
-        
-        if r_main.status_code == 200 and 'Just a moment' not in r_main.text:
-            canonical_url = str(r_main.url)
-            html_text = r_main.text
+    # --- Strategy 1: curl_cffi with TLS browser impersonation + retries ---
+    max_cffi_retries = 4
+    base_delay = 3.0
+    
+    for attempt in range(max_cffi_retries):
+        try:
+            if attempt == 0:
+                print(f"[get_chapters] Trying curl_cffi (impersonate={CFFI_IMPERSONATE})...")
+            else:
+                print(f"[get_chapters] curl_cffi retry {attempt+1}/{max_cffi_retries}...")
             
-            # Title extraction
-            title = None
-            m_title = re.search(r'<div[^>]*class=["\'][^"\']*post-title[^"\']*["\'][^>]*>[\s\S]*?<h[13][^>]*>([\s\S]*?)</h[13]>', html_text)
-            if m_title:
-                title = html_unescape(re.sub(r'<[^>]+>', '', m_title.group(1)).strip())
-            if not title:
-                m_head = re.search(r'<title>([^<]+)</title>', html_text)
-                if m_head:
-                    title = html_unescape(m_head.group(1).split('-')[0].strip())
-            if not title or title == "Just a moment...":
-                title = canonical_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
-
-            # Cover extraction
-            cover_url = None
-            m_cover = re.search(r'<div[^>]*class=["\'][^"\']*summary_image[^"\']*["\'][^>]*>[\s\S]*?<img[^>]+(?:data-src|data-lazy-src|src)=["\']([^"\']+)["\']', html_text)
-            if m_cover:
-                cover_url = m_cover.group(1)
-
-            # Fetch chapters via Madara AJAX endpoint on CANONICAL URL
-            ajax_url = canonical_url.rstrip('/') + '/ajax/chapters/'
-            r_ch = cffi_post(ajax_url, headers={'X-Requested-With': 'XMLHttpRequest'}, timeout=20)
-            ch_html = r_ch.text if (r_ch.status_code == 200 and len(r_ch.text) > 50) else html_text
+            # On first attempt or after Cloudflare block, warm up the session
+            # by visiting the site homepage to collect cookies
+            if attempt > 0 or not cffi_session.cookies:
+                try:
+                    domain = '/'.join(novel_url.split('/')[:3])  # e.g. https://meionovels.com
+                    warm_r = cffi_get(domain + '/', timeout=15)
+                    if warm_r.status_code == 200:
+                        print(f"  [CFFI] Session warmed up (homepage {warm_r.status_code}, cookies: {len(cffi_session.cookies)})")
+                    time.sleep(random.uniform(1.0, 2.5))
+                except Exception:
+                    pass
             
-            pattern = r'<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>'
-            matches = re.findall(pattern, ch_html)
-
-            if not matches:
-                matches = re.findall(r'<a[^>]+href=["\'](https?://[^"\']*/(volume|chapter)[^"\']*)["\'][^>]*>([\s\S]*?)</a>', ch_html, re.IGNORECASE)
-                # Fix: re.findall with 3 groups returns 3-tuples, extract href and title
-                if matches and len(matches[0]) == 3:
-                    matches = [(m[0], m[2]) for m in matches]
-
-            if matches:
-                links = []
-                seen_urls = set()
-                for href, raw_t in matches:
-                    clean_t = html_unescape(re.sub(r'<[^>]+>', '', raw_t).strip())
-                    if href not in seen_urls and clean_t:
-                        seen_urls.add(href)
-                        links.append({'title': clean_t, 'url': href})
+            r_main = cffi_get(novel_url, timeout=30)
+            
+            if r_main.status_code == 200 and 'Just a moment' not in r_main.text:
+                canonical_url = str(r_main.url)
+                html_text = r_main.text
                 
-                if links:
-                    # In Madara /ajax/chapters/, newest is on top, so reverse to oldest first
-                    links.reverse()
-                    print(f"[CFFI] Found {len(links)} chapters for: {title}")
-                    return title, cover_url, links
-        else:
-            status = r_main.status_code
-            has_cf = 'Just a moment' in r_main.text
-            print(f"[CFFI] Novel page failed: HTTP {status}, Cloudflare={has_cf}")
-    except Exception as e:
-        print(f"[CFFI] get_chapters failed: {type(e).__name__}: {e}")
+                # Title extraction
+                title = None
+                m_title = re.search(r'<div[^>]*class=["\'][^"\']*post-title[^"\']*["\'][^>]*>[\s\S]*?<h[13][^>]*>([\s\S]*?)</h[13]>', html_text)
+                if m_title:
+                    title = html_unescape(re.sub(r'<[^>]+>', '', m_title.group(1)).strip())
+                if not title:
+                    m_head = re.search(r'<title>([^<]+)</title>', html_text)
+                    if m_head:
+                        title = html_unescape(m_head.group(1).split('-')[0].strip())
+                if not title or title == "Just a moment...":
+                    title = canonical_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
 
-    # --- Strategy 2: Playwright Headless Browser (Fallback with in-browser AJAX fetch) ---
+                # Cover extraction
+                cover_url = None
+                m_cover = re.search(r'<div[^>]*class=["\'][^"\']*summary_image[^"\']*["\'][^>]*>[\s\S]*?<img[^>]+(?:data-src|data-lazy-src|src)=["\']([^"\']+)["\']', html_text)
+                if m_cover:
+                    cover_url = m_cover.group(1)
+
+                # Fetch chapters via Madara AJAX endpoint on CANONICAL URL
+                ajax_url = canonical_url.rstrip('/') + '/ajax/chapters/'
+                r_ch = cffi_post(ajax_url, headers={'X-Requested-With': 'XMLHttpRequest'}, timeout=20)
+                ch_html = r_ch.text if (r_ch.status_code == 200 and len(r_ch.text) > 50) else html_text
+                
+                pattern = r'<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>'
+                matches = re.findall(pattern, ch_html)
+
+                if not matches:
+                    matches = re.findall(r'<a[^>]+href=["\'](https?://[^"\']*/(volume|chapter)[^"\']*)["\'][^>]*>([\s\S]*?)</a>', ch_html, re.IGNORECASE)
+                    # Fix: re.findall with 3 groups returns 3-tuples, extract href and title
+                    if matches and len(matches[0]) == 3:
+                        matches = [(m[0], m[2]) for m in matches]
+
+                if matches:
+                    links = []
+                    seen_urls = set()
+                    for href, raw_t in matches:
+                        clean_t = html_unescape(re.sub(r'<[^>]+>', '', raw_t).strip())
+                        if href not in seen_urls and clean_t:
+                            seen_urls.add(href)
+                            links.append({'title': clean_t, 'url': href})
+                    
+                    if links:
+                        # In Madara /ajax/chapters/, newest is on top, so reverse to oldest first
+                        links.reverse()
+                        print(f"[CFFI] Found {len(links)} chapters for: {title}")
+                        return title, cover_url, links
+                
+                # Got 200 but no chapters found — page might be incomplete
+                print(f"  [CFFI] Got 200 but no chapters found in HTML (attempt {attempt+1})")
+            else:
+                status = r_main.status_code
+                has_cf = 'Just a moment' in r_main.text
+                print(f"  [CFFI] Novel page failed: HTTP {status}, Cloudflare={has_cf} (attempt {attempt+1})")
+            
+            # Backoff before retry
+            if attempt < max_cffi_retries - 1:
+                backoff = base_delay * (2 ** attempt) + random.uniform(2, 5)
+                print(f"  [CFFI] Backing off {backoff:.1f}s before retry...")
+                time.sleep(backoff)
+                
+        except Exception as e:
+            print(f"  [CFFI] get_chapters error: {type(e).__name__}: {e} (attempt {attempt+1})")
+            if attempt < max_cffi_retries - 1:
+                backoff = base_delay * (2 ** attempt) + random.uniform(2, 5)
+                time.sleep(backoff)
+
+    # --- Strategy 2: Playwright Headless Browser (Fallback with Cloudflare bypass) ---
     print("[get_chapters] Falling back to Playwright...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+            ]
         )
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080},
+            locale='en-US',
+        )
+        # Remove webdriver flag
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+        page = context.new_page()
         
         try:
-            # Try navigating with a generous timeout and retries
-            max_retries = 2
+            # Try navigating with retries
+            max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    wait_strategy = "domcontentloaded" if attempt == 0 else "commit"
+                    wait_strategy = "domcontentloaded" if attempt < 2 else "commit"
                     timeout = 60000 if attempt == 0 else 90000
                     
                     print(f"Navigating to novel page (Attempt {attempt+1}, Strategy: {wait_strategy})...")
                     page.goto(novel_url, timeout=timeout, wait_until=wait_strategy)
-                    break 
+                    
+                    # Check for Cloudflare challenge and wait for it to resolve
+                    page_title = page.title()
+                    if 'Just a moment' in page_title or 'Checking' in page_title:
+                        print(f"  [Playwright] Cloudflare challenge detected, waiting up to 15s for resolution...")
+                        try:
+                            page.wait_for_function(
+                                "() => !document.title.includes('Just a moment') && !document.title.includes('Checking')",
+                                timeout=15000
+                            )
+                            print(f"  [Playwright] Cloudflare challenge resolved!")
+                        except Exception:
+                            print(f"  [Playwright] Cloudflare challenge NOT resolved after 15s")
+                            if attempt < max_retries - 1:
+                                time.sleep(5)
+                                continue
+                    
+                    # Verify we have actual content
+                    time.sleep(3)
+                    content_check = page.evaluate("() => document.querySelector('.post-title') !== null || document.querySelectorAll('a').length > 10")
+                    if content_check:
+                        break
+                    else:
+                        print(f"  [Playwright] Page loaded but no content detected (attempt {attempt+1})")
+                        if attempt < max_retries - 1:
+                            time.sleep(5)
+                            continue
+                    break
+                    
                 except Exception as e:
                     if attempt == max_retries - 1:
                         print(f"Fatal error navigating to {novel_url}: {e}")
                         raise e
                     print(f"Retry navigating to {novel_url} due to: {e}")
                     time.sleep(5)
-            
-            # Wait 2 seconds for potential Cloudflare redirect
-            time.sleep(2)
 
             # In-browser extraction with native async fetch & DOMParser (passes Cloudflare cookies!)
             extracted = page.evaluate("""async () => {
@@ -596,14 +668,26 @@ def get_chapters(novel_url):
                     }
                 }
 
-                return { title, cover_url, chapters };
+                // 5. Debug info
+                let debug = {
+                    pageTitle: document.title,
+                    url: window.location.href,
+                    hasPostTitle: !!document.querySelector('.post-title'),
+                    hasMangaChapter: document.querySelectorAll('.wp-manga-chapter').length,
+                    totalLinks: document.querySelectorAll('a').length,
+                    bodyLength: document.body ? document.body.innerHTML.length : 0,
+                };
+
+                return { title, cover_url, chapters, debug };
             }""")
 
             title = extracted.get('title') or novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
             cover_url = extracted.get('cover_url')
             links = extracted.get('chapters') or []
+            debug = extracted.get('debug', {})
 
             if not links:
+                print(f"  [Playwright] Debug info: {debug}")
                 raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
                 
             print(f"[Playwright] Successfully extracted {len(links)} chapters for: {title}")
