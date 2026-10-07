@@ -544,17 +544,16 @@ def get_chapters(novel_url):
     print("[get_chapters] Falling back to Playwright with stealth...")
     
     try:
-        from playwright_stealth import stealth_sync
+        from playwright_stealth import Stealth
         HAS_STEALTH = True
-    except ImportError:
+    except ImportError as e:
         HAS_STEALTH = False
-        print("WARNING: playwright-stealth not found. CF bypass may fail.")
+        print(f"WARNING: playwright-stealth not found ({e}). CF bypass may fail.")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        browser = p.firefox.launch(
             headless=True,
             args=[
-                '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
             ]
@@ -566,7 +565,10 @@ def get_chapters(novel_url):
         )
         page = context.new_page()
         if HAS_STEALTH:
-            stealth_sync(page)
+            try:
+                Stealth().apply_stealth_sync(page)
+            except Exception as e:
+                print(f"WARNING: Failed to apply stealth: {e}")
         
         try:
             # Try navigating with retries
@@ -583,6 +585,20 @@ def get_chapters(novel_url):
                     page_title = page.title()
                     if 'Just a moment' in page_title or 'Checking' in page_title:
                         print(f"  [Playwright] Cloudflare challenge detected, waiting up to 15s for resolution...")
+                        
+                        # Try to click the Cloudflare checkbox if it exists
+                        try:
+                            time.sleep(3)
+                            # Turnstile is usually in an iframe with 'challenges' in the src
+                            # The checkbox is inside the iframe, but due to cross-origin we can't directly click elements inside
+                            # But we can click the iframe itself in the center
+                            iframe = page.locator('iframe').first
+                            if iframe.count() > 0:
+                                print(f"  [Playwright] Found iframe, attempting to click it...")
+                                iframe.click(position={"x": 30, "y": 30}, force=True, timeout=2000)
+                        except Exception as e:
+                            pass
+
                         try:
                             page.wait_for_function(
                                 "() => !document.title.includes('Just a moment') && !document.title.includes('Checking')",
