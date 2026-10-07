@@ -99,6 +99,7 @@ def clean_database_url(raw_url: str) -> str:
 DATABASE_URL = clean_database_url(os.environ.get("DATABASE_URL", ""))
 NOVEL_URL = os.environ.get("NOVEL_URL") # Provided via GitHub Actions dispatch
 WORKERS = int(os.environ.get("WORKERS", "1"))  # Configurable workers (default 1 to prevent rate-limiting)
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"  # Set to false locally to bypass CF
 BATCH_SIZE = 5
 MAX_CHAPTER_RETRIES = 3  # Retry failed chapters with exponential backoff
 
@@ -552,7 +553,7 @@ def get_chapters(novel_url):
 
     with sync_playwright() as p:
         browser = p.firefox.launch(
-            headless=True,
+            headless=HEADLESS,
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
