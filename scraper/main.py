@@ -98,7 +98,7 @@ def clean_database_url(raw_url: str) -> str:
 # Configuration from environment variables
 DATABASE_URL = clean_database_url(os.environ.get("DATABASE_URL", ""))
 NOVEL_URL = os.environ.get("NOVEL_URL") # Provided via GitHub Actions dispatch
-WORKERS = 1  # Single worker: prevents Cloudflare rate-limit flagging from concurrent requests
+WORKERS = int(os.environ.get("WORKERS", "1"))  # Configurable workers (default 1 to prevent rate-limiting)
 BATCH_SIZE = 5
 MAX_CHAPTER_RETRIES = 3  # Retry failed chapters with exponential backoff
 
