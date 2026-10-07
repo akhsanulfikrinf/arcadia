@@ -90,6 +90,36 @@ class SupabaseStorage:
             print(f"Storage upload error: {e}")
             return False
 
+    def upload_cover(self, novel_id, cover_bytes, content_type='image/jpeg'):
+        """Upload cover image to Supabase Storage."""
+        if not self.enabled:
+            return None
+            
+        # Determine extension based on content type
+        ext = 'jpg'
+        if 'png' in content_type: ext = 'png'
+        elif 'webp' in content_type: ext = 'webp'
+        elif 'gif' in content_type: ext = 'gif'
+        
+        path = f'covers/{novel_id}.{ext}'
+        upload_url = f'{self.url}/storage/v1/object/{self.bucket}/{path}'
+        
+        headers = self._headers()
+        headers['Content-Type'] = content_type
+        headers['x-upsert'] = 'true'
+
+        try:
+            resp = requests.post(upload_url, headers=headers, data=cover_bytes, timeout=30)
+            if resp.status_code in (200, 201):
+                # Return the public URL
+                return f"{self.url}/storage/v1/object/public/{self.bucket}/{path}"
+            else:
+                print(f"Cover upload failed ({resp.status_code}): {resp.text[:200]}")
+                return None
+        except Exception as e:
+            print(f"Cover upload error: {e}")
+            return None
+
     def check_exists(self, novel_id, chapter_id):
         """Check if a chapter JSON file exists in storage."""
         if not self.enabled:

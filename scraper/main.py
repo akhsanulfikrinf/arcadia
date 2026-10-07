@@ -519,7 +519,7 @@ def get_chapters(novel_url):
                         # In Madara /ajax/chapters/, newest is on top, so reverse to oldest first
                         links.reverse()
                         print(f"[CFFI] Found {len(links)} chapters for: {title}")
-                        return title, cover_url, links
+                        return title, cover_url, None, links
                 
                 # Got 200 but no chapters found — page might be incomplete
                 print(f"  [CFFI] Got 200 but no chapters found in HTML (attempt {attempt+1})")
@@ -641,11 +641,26 @@ def get_chapters(novel_url):
                     title = document.title.split('-')[0].trim();
                 }
 
-                // 2. Cover
+                // 2. Cover (and fetch as base64)
                 let cover_url = null;
+                let cover_base64 = null;
                 const img = document.querySelector('.summary_image img');
                 if (img) {
                     cover_url = img.dataset.src || img.dataset.lazySrc || img.src;
+                    if (cover_url) {
+                        try {
+                            let resp = await fetch(cover_url);
+                            let blob = await resp.blob();
+                            cover_base64 = await new Promise((resolve, reject) => {
+                                let reader = new FileReader();
+                                reader.onloadend = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                        } catch(e) {
+                            console.error('Failed to fetch cover image:', e);
+                        }
+                    }
                 }
 
                 // 3. Chapters via in-browser AJAX fetch (runs in browser context with session cookies)
@@ -701,11 +716,12 @@ def get_chapters(novel_url):
                     bodyLength: document.body ? document.body.innerHTML.length : 0,
                 };
 
-                return { title, cover_url, chapters, debug };
+                return { title, cover_url, cover_base64, chapters, debug };
             }""")
 
             title = extracted.get('title') or novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
             cover_url = extracted.get('cover_url')
+            cover_base64 = extracted.get('cover_base64')
             links = extracted.get('chapters') or []
             debug = extracted.get('debug', {})
 
@@ -714,7 +730,7 @@ def get_chapters(novel_url):
                 raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
                 
             print(f"[Playwright] Successfully extracted {len(links)} chapters for: {title}")
-            return title, cover_url, links
+            return title, cover_url, cover_base64, links
         finally:
             browser.close()
 
@@ -765,13 +781,31 @@ def run(target_url=None):
 
 
 def run_single_novel(novel_url, force=False):
-    title, cover_url, chapters = get_chapters(novel_url)
+    title, cover_url, cover_base64, chapters = get_chapters(novel_url)
     print(f"Found novel: {title} with {len(chapters)} chapters. Cover: {cover_url}")
 
     conn = db_pool.getconn()
     cur = conn.cursor()
 
     novel_id = get_or_create_novel(cur, title, novel_url, cover_url)
+
+    # If we successfully grabbed the cover as base64, upload it to storage!
+    if cover_base64 and storage.enabled:
+        try:
+            import base64
+            # format: data:image/jpeg;base64,...
+            header, encoded = cover_base64.split(",", 1)
+            content_type = header.split(";")[0].split(":")[1]
+            cover_bytes = base64.b64decode(encoded)
+            
+            new_cover_url = storage.upload_cover(novel_id, cover_bytes, content_type)
+            if new_cover_url:
+                print(f"Successfully re-hosted cover image to Supabase: {new_cover_url}")
+                # Update database with new URL
+                cur.execute("UPDATE public.novels SET cover_url = %s WHERE id = %s", (new_cover_url, novel_id))
+                conn.commit()
+        except Exception as e:
+            print(f"Failed to process and upload cover base64: {e}")
     
     # 1. Register all chapters upfront so DB and Admin UI immediately reflect the true chapter count (e.g. 110)
     cur.executemany(
