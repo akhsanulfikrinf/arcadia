@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, BookOpen, Edit2, Check, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Edit2, Check, X, Upload, Loader2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
 
 interface Novel {
@@ -30,6 +30,32 @@ export default function NovelDetails() {
     const [isEditing, setIsEditing] = useState(false);
     const [editedTitle, setEditedTitle] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [isUploadingCover, setIsUploadingCover] = useState(false);
+
+    const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0 || !novel) return;
+        const file = e.target.files[0];
+        setIsUploadingCover(true);
+        try {
+            const coverPath = `covers/${novel.id}.jpg`;
+            const { error: uploadErr } = await supabase.storage
+                .from('novel-contents')
+                .upload(coverPath, file, { contentType: file.type, upsert: true });
+
+            if (!uploadErr) {
+                const { data } = supabase.storage.from('novel-contents').getPublicUrl(coverPath);
+                if (data?.publicUrl) {
+                    const newUrl = data.publicUrl + "?t=" + Date.now();
+                    await supabase.from('novels').update({ cover_url: newUrl }).eq('id', novel.id);
+                    setNovel({ ...novel, cover_url: newUrl });
+                }
+            }
+        } catch (err) {
+            console.error("Cover upload failed", err);
+        } finally {
+            setIsUploadingCover(false);
+        }
+    };
 
     useEffect(() => {
         async function loadData() {
@@ -147,8 +173,8 @@ export default function NovelDetails() {
             </Link>
 
             <div className="flex flex-col md:flex-row gap-8 mb-12 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm">
-                <div className="w-full md:w-1/3 max-w-[240px] shrink-0 mx-auto md:mx-0">
-                    <div className="aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-xl overflow-hidden shadow-md">
+                                <div className="w-full md:w-1/3 max-w-[240px] shrink-0 mx-auto md:mx-0">
+                    <div className="aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-xl overflow-hidden shadow-md relative group">
                         {novel.cover_url ? (
                             <img referrerPolicy="no-referrer"
                                 src={novel.cover_url}
@@ -159,6 +185,26 @@ export default function NovelDetails() {
                             <div className="w-full h-full flex items-center justify-center text-gray-400">
                                 No Cover
                             </div>
+                        )}
+                        
+                        {isEditing && (
+                            <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white cursor-pointer transition-opacity">
+                                {isUploadingCover ? (
+                                    <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                                ) : (
+                                    <>
+                                        <Upload className="w-8 h-8 mb-2" />
+                                        <span className="text-sm font-medium">Upload Cover</span>
+                                    </>
+                                )}
+                                <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={handleCoverUpload} 
+                                    disabled={isUploadingCover}
+                                />
+                            </label>
                         )}
                     </div>
                 </div>
