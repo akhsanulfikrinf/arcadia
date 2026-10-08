@@ -299,9 +299,18 @@ export default function Upload() {
             if (!isExistingNovel) setTitle("");
             setCoverUrl("");
             
-        } catch (err: unknown) {
+        } catch (err: any) {
             console.error("Upload Error:", err);
-            setError((err instanceof Error ? err.message : null) || "An unknown error occurred during upload.");
+            let errorMsg = "An unknown error occurred during upload.";
+            if (err instanceof Error) {
+                errorMsg = err.message;
+            } else if (err && typeof err === 'object') {
+                if (err.message) errorMsg = String(err.message);
+                else if (err.error_description) errorMsg = String(err.error_description);
+            } else if (typeof err === 'string') {
+                errorMsg = err;
+            }
+            setError(errorMsg);
         } finally {
             setIsProcessing(false);
             setProgressStr("");

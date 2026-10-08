@@ -50,8 +50,9 @@ export default function NovelDetails() {
                     setNovel({ ...novel, cover_url: newUrl });
                 }
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error("Cover upload failed", err);
+            alert("Upload failed: " + (err.message || "Unknown error"));
         } finally {
             setIsUploadingCover(false);
         }
