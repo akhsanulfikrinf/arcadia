@@ -76,7 +76,7 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s*[\dIVXLCDM]+|^(?:Prologue|Epilogue)/im;
+        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s*[\dIVXLCDM]+|^(?:Prologue|Prolog|Epilogue|Epilog)/im;
         const lines = text.split('\n');
         const chapters: {title: string, content: string}[] = [];
         
@@ -86,8 +86,13 @@ export default function Upload() {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
+            if (/^\d+$/.test(line)) continue; // Skip page numbers
             
             if (regex.test(line) && line.length < 100) {
+                if (currentContent.length < 15 && chapters.length > 0) {
+                    currentContent.push(line);
+                    continue;
+                }
                 if (currentContent.length > 0) {
                     chapters.push({
                         title: currentTitle,
