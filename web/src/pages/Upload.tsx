@@ -118,6 +118,33 @@ export default function Upload() {
             let novelId = "";
             let startChapterIndex = 0;
 
+            // Optional: Extract cover from the latest (last) PDF volume if no cover URL provided
+            let coverBlob: Blob | null = null;
+            if (!coverUrl.trim()) {
+                const pdfFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+                if (pdfFiles.length > 0) {
+                    setProgressStr("Extracting cover image from the latest PDF volume...");
+                    const latestPdf = pdfFiles[pdfFiles.length - 1];
+                    try {
+                        const arrayBuffer = await latestPdf.arrayBuffer();
+                        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                        const page = await pdf.getPage(1);
+                        const viewport = page.getViewport({ scale: 1.5 });
+                        
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+                            await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+                            coverBlob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.8));
+                        }
+                    } catch (e) {
+                        console.error("Failed to extract cover from PDF:", e);
+                    }
+                }
+            }
+
             // Check if novel already exists
             const { data: existingNovel, error: searchErr } = await supabase
                 .from('novels')
@@ -156,6 +183,22 @@ export default function Upload() {
                 
                 if (createErr || !newNovel) throw createErr || new Error("Failed to create novel.");
                 novelId = newNovel.id;
+            }
+
+            // Upload the extracted cover image if one was generated
+            if (coverBlob) {
+                setProgressStr("Uploading extracted cover image...");
+                const coverPath = `covers/${novelId}.jpg`;
+                const { error: coverUploadErr } = await supabase.storage
+                    .from('novel-contents')
+                    .upload(coverPath, coverBlob, { contentType: 'image/jpeg', upsert: true });
+                
+                if (!coverUploadErr) {
+                    const { data: publicUrlData } = supabase.storage.from('novel-contents').getPublicUrl(coverPath);
+                    if (publicUrlData && publicUrlData.publicUrl) {
+                        await supabase.from('novels').update({ cover_url: publicUrlData.publicUrl }).eq('id', novelId);
+                    }
+                }
             }
 
             let globalCompletedCount = 0;
