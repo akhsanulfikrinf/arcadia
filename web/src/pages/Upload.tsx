@@ -8,7 +8,7 @@ import { Upload as UploadIcon, FileText, Loader2, CheckCircle2, AlertCircle } fr
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 export default function Upload() {
-    const [file, setFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
     const [title, setTitle] = useState("");
     const [coverUrl, setCoverUrl] = useState("");
     const [splitChapters, setSplitChapters] = useState(true);
@@ -20,10 +20,10 @@ export default function Upload() {
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
-            const selected = e.target.files[0];
-            setFile(selected);
-            // Default title from filename without extension
-            setTitle(selected.name.replace(/\.[^/.]+$/, ""));
+            const selectedFiles = Array.from(e.target.files).sort((a, b) => a.name.localeCompare(b.name));
+            setFiles(selectedFiles);
+            // Default title from first filename, stripping volume/chapter identifiers
+            setTitle(selectedFiles[0].name.replace(/\.[^/.]+$/, "").replace(/\s*(volume|vol|bab|chapter|bagian)\s*\d+/i, "").trim());
             setError("");
             setSuccess("");
         }
@@ -60,10 +60,7 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        // Split based on common chapter markers (Chapter X, Bab X, Volume X)
-        // This is a heuristic approach
         const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+[\dIVXLCDM]+/im;
-        
         const lines = text.split('\n');
         const chapters: {title: string, content: string}[] = [];
         
@@ -74,9 +71,7 @@ export default function Upload() {
             const line = lines[i].trim();
             if (!line) continue;
             
-            // If line matches chapter format and is relatively short
             if (regex.test(line) && line.length < 100) {
-                // Save previous chapter if it has content
                 if (currentContent.length > 0) {
                     chapters.push({
                         title: currentTitle,
@@ -90,7 +85,6 @@ export default function Upload() {
             }
         }
         
-        // Push the last chapter
         if (currentContent.length > 0) {
             chapters.push({
                 title: currentTitle,
@@ -98,7 +92,6 @@ export default function Upload() {
             });
         }
         
-        // If no chapters found via regex, fallback to single chapter
         if (chapters.length === 0) {
             return [{ title: "Chapter 1", content: text }];
         }
@@ -107,8 +100,8 @@ export default function Upload() {
     };
 
     const handleUpload = async () => {
-        if (!file) {
-            setError("Please select a file.");
+        if (files.length === 0) {
+            setError("Please select at least one file.");
             return;
         }
         if (!title.trim()) {
@@ -119,85 +112,114 @@ export default function Upload() {
         setIsProcessing(true);
         setError("");
         setSuccess("");
-        setProgressStr("Extracting text from file...");
 
         try {
-            // 1. Extract text
-            const text = await extractText(file);
-            
-            setProgressStr("Processing chapters...");
-            // 2. Process chapters
-            const parsedChapters = processChapters(text);
-            
-            if (parsedChapters.length === 0) {
-                throw new Error("No readable content found in file.");
-            }
+            setProgressStr("Checking database for existing novel...");
+            let novelId = "";
+            let startChapterIndex = 0;
 
-            setProgressStr(`Found ${parsedChapters.length} chapters. Creating novel...`);
-
-            // 3. Insert Novel
-            // Generate a fake url since this is a manual upload
-            const fakeUrl = `https://manual-upload/${Date.now()}`;
-            const { data: novelData, error: novelErr } = await supabase
+            // Check if novel already exists
+            const { data: existingNovel, error: searchErr } = await supabase
                 .from('novels')
-                .insert({
-                    title: title.trim(),
-                    url: fakeUrl,
-                    cover_url: coverUrl.trim() || null
-                })
-                .select()
-                .single();
-                
-            if (novelErr || !novelData) throw novelErr || new Error("Failed to create novel.");
-            const novelId = novelData.id;
+                .select('id')
+                .ilike('title', title.trim())
+                .maybeSingle();
 
-            // 4. Insert Chapters and Upload Content
-            let completedCount = 0;
-            for (let i = 0; i < parsedChapters.length; i++) {
-                const ch = parsedChapters[i];
-                setProgressStr(`Uploading chapter ${i + 1} of ${parsedChapters.length}...`);
-                
-                // Insert chapter row
-                const { data: chData, error: chErr } = await supabase
+            if (searchErr) throw searchErr;
+
+            if (existingNovel) {
+                novelId = existingNovel.id;
+                // Get max chapter index
+                const { data: lastChapter } = await supabase
                     .from('chapters')
-                    .insert({
-                        novel_id: novelId,
-                        title: ch.title.length > 255 ? ch.title.substring(0, 250) + '...' : ch.title,
-                        chapter_index: i
-                    })
-                    .select()
+                    .select('chapter_index')
+                    .eq('novel_id', novelId)
+                    .order('chapter_index', { ascending: false })
+                    .limit(1)
                     .single();
-                    
-                if (chErr || !chData) throw chErr || new Error("Failed to create chapter.");
-                const chapterId = chData.id;
-
-                // Build content array
-                const paragraphs = ch.content.split('\n').map(p => p.trim()).filter(p => p.length > 0);
-                const contentBlocks = paragraphs.map((p, idx) => ({
-                    type: "paragraph",
-                    position: idx,
-                    content: p
-                }));
-
-                // Upload to Storage
-                const storagePath = `novels/${novelId}/${chapterId}.json`;
-                const { error: storageErr } = await supabase.storage
-                    .from('novel-contents')
-                    .upload(storagePath, JSON.stringify(contentBlocks), {
-                        contentType: 'application/json',
-                        upsert: true
-                    });
-                    
-                if (storageErr) throw storageErr;
-                completedCount++;
+                
+                if (lastChapter) {
+                    startChapterIndex = lastChapter.chapter_index + 1;
+                }
+            } else {
+                // Create new novel
+                const fakeUrl = `https://manual-upload/${Date.now()}`;
+                const { data: newNovel, error: createErr } = await supabase
+                    .from('novels')
+                    .insert({
+                        title: title.trim(),
+                        url: fakeUrl,
+                        cover_url: coverUrl.trim() || null
+                    })
+                    .select('id')
+                    .single();
+                
+                if (createErr || !newNovel) throw createErr || new Error("Failed to create novel.");
+                novelId = newNovel.id;
             }
 
-            setSuccess(`Successfully uploaded "${title}" with ${completedCount} chapters!`);
-            setFile(null);
+            let globalCompletedCount = 0;
+            let currentChapterIndex = startChapterIndex;
+
+            // Process each file sequentially
+            for (let fIdx = 0; fIdx < files.length; fIdx++) {
+                const currentFile = files[fIdx];
+                setProgressStr(`[File ${fIdx + 1}/${files.length}] Extracting text from ${currentFile.name}...`);
+                
+                const text = await extractText(currentFile);
+                
+                setProgressStr(`[File ${fIdx + 1}/${files.length}] Processing chapters...`);
+                const parsedChapters = processChapters(text);
+                
+                if (parsedChapters.length === 0) continue;
+
+                for (let i = 0; i < parsedChapters.length; i++) {
+                    const ch = parsedChapters[i];
+                    setProgressStr(`[File ${fIdx + 1}/${files.length}] Uploading chapter ${i + 1} of ${parsedChapters.length}...`);
+                    
+                    const { data: chData, error: chErr } = await supabase
+                        .from('chapters')
+                        .insert({
+                            novel_id: novelId,
+                            title: ch.title.length > 255 ? ch.title.substring(0, 250) + '...' : ch.title,
+                            chapter_index: currentChapterIndex
+                        })
+                        .select('id')
+                        .single();
+                        
+                    if (chErr || !chData) throw chErr || new Error("Failed to create chapter.");
+                    const chapterId = chData.id;
+
+                    const paragraphs = ch.content.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+                    const contentBlocks = paragraphs.map((p, idx) => ({
+                        type: "paragraph",
+                        position: idx,
+                        content: p
+                    }));
+
+                    const storagePath = `novels/${novelId}/${chapterId}.json`;
+                    const { error: storageErr } = await supabase.storage
+                        .from('novel-contents')
+                        .upload(storagePath, JSON.stringify(contentBlocks), {
+                            contentType: 'application/json',
+                            upsert: true
+                        });
+                        
+                    if (storageErr) throw storageErr;
+                    
+                    currentChapterIndex++;
+                    globalCompletedCount++;
+                }
+            }
+
+            setSuccess(existingNovel 
+                ? `Successfully appended ${globalCompletedCount} chapters to existing novel "${title}"!`
+                : `Successfully uploaded new novel "${title}" with ${globalCompletedCount} chapters!`);
+            setFiles([]);
             setTitle("");
             setCoverUrl("");
             
-        } catch (err) {
+        } catch (err: unknown) {
             console.error("Upload Error:", err);
             setError((err instanceof Error ? err.message : null) || "An unknown error occurred during upload.");
         } finally {
@@ -217,20 +239,21 @@ export default function Upload() {
                 
                 {/* File Input */}
                 <div>
-                    <label className="block text-sm font-medium mb-1">Select File (.txt, .docx, .pdf)</label>
+                    <label className="block text-sm font-medium mb-1">Select File(s) (.txt, .docx, .pdf)</label>
                     <div className="flex items-center gap-4">
                         <label className="flex-1 cursor-pointer border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 rounded-lg p-6 flex flex-col items-center justify-center text-center transition-colors">
                             <input 
                                 type="file" 
                                 className="hidden" 
                                 accept=".txt,.docx,.pdf"
+                                multiple
                                 onChange={handleFileChange}
                                 disabled={isProcessing}
                             />
                             <UploadIcon className="w-8 h-8 text-zinc-400 mb-2" />
-                            {file ? (
+                            {files.length > 0 ? (
                                 <span className="text-zinc-900 dark:text-zinc-100 font-medium">
-                                    {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                                    {files.length} file(s) selected
                                 </span>
                             ) : (
                                 <span className="text-zinc-500">Click to browse or drag & drop</span>
@@ -248,7 +271,7 @@ export default function Upload() {
                             className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
-                            placeholder="e.g. Overlord Volume 1"
+                            placeholder="e.g. Overlord"
                             disabled={isProcessing}
                         />
                     </div>
@@ -295,7 +318,7 @@ export default function Upload() {
                 <div className="pt-4 flex justify-end">
                     <button
                         onClick={handleUpload}
-                        disabled={!file || !title || isProcessing}
+                        disabled={files.length === 0 || !title || isProcessing}
                         className="px-6 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         {isProcessing ? (
