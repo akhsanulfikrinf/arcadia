@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, BookOpen, Edit2, Check, X, Upload, Loader2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Edit2, Check, X, Upload, Loader2, ImagePlus } from "lucide-react";
 import { supabase } from "../supabaseClient";
 
 interface Novel {

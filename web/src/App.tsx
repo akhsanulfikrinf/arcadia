@@ -20,6 +20,7 @@ import ManualRescrape from "./pages/ManualRescrape";
 import Bookmarks from "./pages/Bookmarks";
 import HistoryPage from "./pages/History";
 import Upload from "./pages/Upload";
+import ManageIllustrations from "./pages/ManageIllustrations";
 
 
 import type { Session } from "@supabase/supabase-js";
@@ -391,6 +392,7 @@ function App() {
                         <Route path="/bookmarks" element={<Bookmarks />} />
                         <Route path="/history" element={<HistoryPage />} />
                         <Route path="/upload" element={<Upload />} />
+                        <Route path="/novel/:id/illustrations" element={<ManageIllustrations />} />
                         {userProfile?.is_admin && (
                             <>
                                 <Route path="/admin" element={<Admin />} />
