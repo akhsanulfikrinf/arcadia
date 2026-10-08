@@ -62,8 +62,39 @@ export default function Upload() {
                 setProgressStr(`Reading PDF page ${i} of ${pdf.numPages}...`);
                 const page = await pdf.getPage(i);
                 const content = await page.getTextContent();
-                const pageText = content.items.map((item) => ('str' in item ? item.str : "")).join(" ");
-                fullText += pageText + "\n\n";
+                
+                const textItems = content.items.filter(item => 'str' in item) as any[];
+                textItems.sort((a, b) => {
+                    const yDiff = b.transform[5] - a.transform[5];
+                    if (Math.abs(yDiff) < 5) {
+                        return a.transform[4] - b.transform[4];
+                    }
+                    return yDiff;
+                });
+                
+                let pageText = "";
+                let lastY = -1;
+                for (const item of textItems) {
+                    const y = Math.round(item.transform[5]);
+                    if (lastY !== -1 && Math.abs(y - lastY) > 4) {
+                        pageText += "\n";
+                    } else if (lastY !== -1 && item.str.trim() !== "") {
+                        pageText += " ";
+                    }
+                    pageText += item.str;
+                    lastY = y;
+                }
+
+                // Strip header, footer, page number
+                const lines = pageText.split('\n').filter(line => {
+                    const t = line.trim().toLowerCase();
+                    if (/^\d+$/.test(t)) return false; // skip pure page numbers
+                    if (t.includes('ruidrive.com')) return false; // skip footer
+                    if (title && t.includes(title.toLowerCase()) && t.length < 100) return false; // skip header with novel title
+                    return true;
+                });
+
+                fullText += lines.join('\n') + "\n\n";
             }
             return fullText;
         } else {
@@ -89,7 +120,7 @@ export default function Upload() {
             if (/^\d+$/.test(line)) continue; // Skip page numbers
             
             if (regex.test(line) && line.length < 100) {
-                if (currentContent.length < 15 && chapters.length > 0) {
+                if (currentContent.length < 15) {
                     currentContent.push(line);
                     continue;
                 }
