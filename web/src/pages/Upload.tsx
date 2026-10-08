@@ -58,6 +58,7 @@ export default function Upload() {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
             let fullText = "";
+            
             for (let i = 1; i <= pdf.numPages; i++) {
                 setProgressStr(`Reading PDF page ${i} of ${pdf.numPages}...`);
                 const page = await pdf.getPage(i);
@@ -74,13 +75,33 @@ export default function Upload() {
                 
                 let pageText = "";
                 let lastY = -1;
+                let lineStartX = -1;
+                
                 for (const item of textItems) {
+                    const x = Math.round(item.transform[4]);
                     const y = Math.round(item.transform[5]);
-                    if (lastY !== -1 && Math.abs(y - lastY) > 4) {
-                        pageText += "\n";
-                    } else if (lastY !== -1 && item.str.trim() !== "") {
+                    const fontSize = Math.abs(item.transform[3]) || 12;
+                    const yDiff = Math.abs(y - lastY);
+                    
+                    if (lastY !== -1 && yDiff > 4) {
+                        // Check if it's a new paragraph or just line wrap
+                        const isLargeGap = yDiff > Math.max(15, fontSize * 1.5);
+                        const isIndented = lineStartX !== -1 && (x - lineStartX) > fontSize * 1.2;
+                        
+                        if (isLargeGap || isIndented) {
+                            pageText += "\n";
+                        } else {
+                            if (!pageText.endsWith(" ") && !pageText.endsWith("-")) {
+                                pageText += " ";
+                            }
+                        }
+                        lineStartX = x;
+                    } else if (lastY !== -1 && item.str.trim() !== "" && !pageText.endsWith(" ")) {
                         pageText += " ";
+                    } else if (lastY === -1) {
+                        lineStartX = x;
                     }
+                    
                     pageText += item.str;
                     lastY = y;
                 }
@@ -88,9 +109,9 @@ export default function Upload() {
                 // Strip header, footer, page number
                 const lines = pageText.split('\n').filter(line => {
                     const t = line.trim().toLowerCase();
-                    if (/^\d+$/.test(t)) return false; // skip pure page numbers
-                    if (t.includes('ruidrive.com')) return false; // skip footer
-                    if (title && t.includes(title.toLowerCase()) && t.length < 100) return false; // skip header with novel title
+                    if (/^\d+$/.test(t)) return false;
+                    if (t.includes('ruidrive.com')) return false;
+                    if (title && t.includes(title.toLowerCase()) && t.length < 100) return false;
                     return true;
                 });
 
@@ -107,45 +128,67 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s*[\dIVXLCDM]+|^(?:Prologue|Prolog|Epilogue|Epilog)/im;
+        // Match exactly: Chapter 1, Bab 1, Volume 1, Bagian 1, OR Bab I, Bab IV, etc. MUST be followed by a boundary
+        // Also match Prolog/Epilog/Kata Penutup
+        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:\s|:|-|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:\s|:|-|$)/i;
         const lines = text.split('\n');
-        const chapters: {title: string, content: string}[] = [];
         
-        let currentTitle = "Chapter 1";
-        let currentContent: string[] = [];
-        
+        // 1. Find all candidate markers
+        const candidates: { lineIndex: number, title: string }[] = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line) continue;
-            if (/^\d+$/.test(line)) continue; // Skip page numbers
+            // Skip page numbers or lines with dots (usually TOC)
+            if (/^\d+$/.test(line) || /\.{2,}/.test(line)) continue; 
             
-            if (regex.test(line) && line.length < 100) {
-                if (currentContent.length < 15) {
-                    currentContent.push(line);
-                    continue;
-                }
-                if (currentContent.length > 0) {
-                    chapters.push({
-                        title: currentTitle,
-                        content: currentContent.join('\n')
-                    });
-                }
-                currentTitle = line;
-                currentContent = [];
-            } else {
-                currentContent.push(line);
+            if (regex.test(line) && line.length < 150) {
+                candidates.push({ lineIndex: i, title: line });
             }
         }
         
-        if (currentContent.length > 0) {
+        // 2. Filter out TOC clusters (markers too close to each other)
+        const validMarkers: { lineIndex: number, title: string }[] = [];
+        for (let i = 0; i < candidates.length; i++) {
+            const current = candidates[i];
+            const prev = candidates[i - 1];
+            const next = candidates[i + 1];
+            
+            const distPrev = prev ? current.lineIndex - prev.lineIndex : Infinity;
+            const distNext = next ? next.lineIndex - current.lineIndex : Infinity;
+            
+            // If it's within 15 lines of another marker, it's a TOC entry.
+            if (distPrev < 15 || distNext < 15) continue;
+            
+            validMarkers.push(current);
+        }
+        
+        // 3. Split the text using valid markers
+        if (validMarkers.length === 0) {
+            return [{ title: "Chapter 1", content: text }];
+        }
+        
+        const chapters: {title: string, content: string}[] = [];
+        
+        // Add preamble (content before first marker) if any
+        const preambleContent = lines.slice(0, validMarkers[0].lineIndex).join('\n').trim();
+        if (preambleContent.length > 0) {
             chapters.push({
-                title: currentTitle,
-                content: currentContent.join('\n')
+                title: "Bagian Awal",
+                content: preambleContent
             });
         }
         
-        if (chapters.length === 0) {
-            return [{ title: "Chapter 1", content: text }];
+        for (let i = 0; i < validMarkers.length; i++) {
+            const marker = validMarkers[i];
+            const nextMarker = validMarkers[i + 1];
+            
+            const startIdx = marker.lineIndex + 1; // Content starts after the title
+            const endIdx = nextMarker ? nextMarker.lineIndex : lines.length;
+            
+            const content = lines.slice(startIdx, endIdx).join('\n').trim();
+            chapters.push({
+                title: marker.title,
+                content: content
+            });
         }
         
         return chapters;
