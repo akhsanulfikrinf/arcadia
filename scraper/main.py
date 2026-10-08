@@ -9,7 +9,6 @@ import requests
 from html import unescape as html_unescape
 import psycopg2
 from psycopg2 import pool
-from playwright.sync_api import sync_playwright
 from utils.storage import SupabaseStorage
 
 # --- curl_cffi setup with diagnostic logging ---
@@ -541,97 +540,51 @@ def get_chapters(novel_url):
                 backoff = base_delay * (2 ** attempt) + random.uniform(2, 5)
                 time.sleep(backoff)
 
-    # --- Strategy 2: Playwright Headless Browser (Fallback with Cloudflare bypass) ---
-    print("[get_chapters] Falling back to Playwright with stealth...")
+        # --- Strategy 2: DrissionPage (Local Chrome/Edge for strong CF bypass) ---
+    print("[get_chapters] Falling back to DrissionPage (local Chromium)...")
     
     try:
-        from playwright_stealth import Stealth
-        HAS_STEALTH = True
-    except ImportError as e:
-        HAS_STEALTH = False
-        print(f"WARNING: playwright-stealth not found ({e}). CF bypass may fail.")
+        from DrissionPage import ChromiumPage, ChromiumOptions
+    except ImportError:
+        raise Exception("DrissionPage not installed. Please run: pip install DrissionPage")
 
-    with sync_playwright() as p:
-        browser = p.firefox.launch(
-            headless=HEADLESS,
-            args=[
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-            ]
-        )
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            locale='en-US',
-        )
-        page = context.new_page()
-        if HAS_STEALTH:
-            try:
-                Stealth().apply_stealth_sync(page)
-            except Exception as e:
-                print(f"WARNING: Failed to apply stealth: {e}")
+    # Set up DrissionPage options
+    co = ChromiumOptions()
+    if HEADLESS:
+        co.headless()
+    
+    # Try to find a local browser (Chrome/Edge/Brave). 
+    # DrissionPage auto-detects by default, but we can set common paths if needed.
+    # co.set_browser_path(r'C:\Program Files\Google\Chrome\Application\chrome.exe')
+    
+    co.set_argument('--no-sandbox')
+    co.set_argument('--disable-gpu')
+    co.set_argument('--disable-setuid-sandbox')
+    co.set_argument('--disable-blink-features=AutomationControlled')
+    
+    page = ChromiumPage(co)
+    
+    try:
+        print(f"Navigating to novel page...")
+        page.get(novel_url, retry=2, interval=3)
         
-        try:
-            # Try navigating with retries
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    wait_strategy = "domcontentloaded" if attempt < 2 else "commit"
-                    timeout = 60000 if attempt == 0 else 90000
-                    
-                    print(f"Navigating to novel page (Attempt {attempt+1}, Strategy: {wait_strategy})...")
-                    page.goto(novel_url, timeout=timeout, wait_until=wait_strategy)
-                    
-                    # Check for Cloudflare challenge and wait for it to resolve
-                    page_title = page.title()
-                    if 'Just a moment' in page_title or 'Checking' in page_title:
-                        print(f"  [Playwright] Cloudflare challenge detected, waiting up to 15s for resolution...")
-                        
-                        # Try to click the Cloudflare checkbox if it exists
-                        try:
-                            time.sleep(3)
-                            # Turnstile is usually in an iframe with 'challenges' in the src
-                            # The checkbox is inside the iframe, but due to cross-origin we can't directly click elements inside
-                            # But we can click the iframe itself in the center
-                            iframe = page.locator('iframe').first
-                            if iframe.count() > 0:
-                                print(f"  [Playwright] Found iframe, attempting to click it...")
-                                iframe.click(position={"x": 30, "y": 30}, force=True, timeout=2000)
-                        except Exception as e:
-                            pass
+        # Wait for CF challenge to resolve (check title)
+        for _ in range(15):
+            title = page.title
+            if 'Just a moment' not in title and 'Checking' not in title:
+                break
+            print("  [DrissionPage] Cloudflare challenge detected, waiting...")
+            time.sleep(2)
+            
+        # Verify content
+        if not page.ele('.post-title', timeout=5) and not page.eles('tag:a', timeout=2):
+            print(f"  [DrissionPage] Page loaded but no content detected.")
+        else:
+            print(f"  [DrissionPage] Cloudflare challenge resolved!")
 
-                        try:
-                            page.wait_for_function(
-                                "() => !document.title.includes('Just a moment') && !document.title.includes('Checking')",
-                                timeout=15000
-                            )
-                            print(f"  [Playwright] Cloudflare challenge resolved!")
-                        except Exception:
-                            print(f"  [Playwright] Cloudflare challenge NOT resolved after 15s")
-                            if attempt < max_retries - 1:
-                                time.sleep(5)
-                                continue
-                    
-                    # Verify we have actual content
-                    time.sleep(3)
-                    content_check = page.evaluate("() => document.querySelector('.post-title') !== null || document.querySelectorAll('a').length > 10")
-                    if content_check:
-                        break
-                    else:
-                        print(f"  [Playwright] Page loaded but no content detected (attempt {attempt+1})")
-                        if attempt < max_retries - 1:
-                            time.sleep(5)
-                            continue
-                    break
-                    
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        print(f"Fatal error navigating to {novel_url}: {e}")
-                        raise e
-                    print(f"Retry navigating to {novel_url} due to: {e}")
-                    time.sleep(5)
-
-            # In-browser extraction with native async fetch & DOMParser (passes Cloudflare cookies!)
-            extracted = page.evaluate("""async () => {
+        # Run the same extraction JS script
+        script = """
+            async function extractData() {
                 // 1. Title
                 let title = '';
                 const titleEl = document.querySelector('.post-title h1, .post-title h3, h1');
@@ -663,10 +616,10 @@ def get_chapters(novel_url):
                     }
                 }
 
-                // 3. Chapters via in-browser AJAX fetch (runs in browser context with session cookies)
+                // 3. Chapters via in-browser AJAX fetch
                 let chapters = [];
                 try {
-                    let ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
+                    let ajaxUrl = window.location.href.replace(/\/?$/, '/ajax/chapters/');
                     let resp = await fetch(ajaxUrl, {
                         method: 'POST',
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -706,33 +659,46 @@ def get_chapters(novel_url):
                     }
                 }
 
-                // 5. Debug info
-                let debug = {
-                    pageTitle: document.title,
-                    url: window.location.href,
-                    hasPostTitle: !!document.querySelector('.post-title'),
-                    hasMangaChapter: document.querySelectorAll('.wp-manga-chapter').length,
-                    totalLinks: document.querySelectorAll('a').length,
-                    bodyLength: document.body ? document.body.innerHTML.length : 0,
+                return {
+                    title: title,
+                    cover_url: cover_url,
+                    cover_base64: cover_base64,
+                    chapters: chapters,
+                    debug: {
+                        pageTitle: document.title,
+                        url: window.location.href,
+                        hasPostTitle: !!document.querySelector('.post-title'),
+                        hasMangaChapter: document.querySelectorAll('.wp-manga-chapter').length,
+                        totalLinks: document.querySelectorAll('a').length,
+                        bodyLength: document.body.innerHTML.length
+                    }
                 };
+            }
+            return await extractData();
+        """
+        extracted = page.run_js(script)
+        
+        if not extracted:
+            raise Exception("Failed to execute extraction script in browser")
+            
+        title = extracted.get('title') or "Unknown Title"
+        cover_url = extracted.get('cover_url')
+        cover_base64 = extracted.get('cover_base64')
+        links = extracted.get('chapters') or []
+        debug = extracted.get('debug', {})
 
-                return { title, cover_url, cover_base64, chapters, debug };
-            }""")
-
-            title = extracted.get('title') or novel_url.rstrip('/').split('/')[-1].replace('-', ' ').title()
-            cover_url = extracted.get('cover_url')
-            cover_base64 = extracted.get('cover_base64')
-            links = extracted.get('chapters') or []
-            debug = extracted.get('debug', {})
-
-            if not links:
-                print(f"  [Playwright] Debug info: {debug}")
-                raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
-                
-            print(f"[Playwright] Successfully extracted {len(links)} chapters for: {title}")
-            return title, cover_url, cover_base64, links
-        finally:
-            browser.close()
+        if not links:
+            print(f"  [DrissionPage] Debug info: {debug}")
+            raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
+            
+        print(f"[DrissionPage] Successfully extracted {len(links)} chapters for: {title}")
+        return title, cover_url, cover_base64, links
+        
+    finally:
+        try:
+            page.quit()
+        except:
+            pass
 
 
 def get_or_create_novel(cur, title, url, cover_url):

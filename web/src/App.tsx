@@ -7,6 +7,7 @@ import {
     UserCircle,
     LogOut,
     Settings,
+    Upload as UploadIcon,
     Bookmark,
     History,
 } from "lucide-react";
@@ -18,6 +19,8 @@ import Admin from "./pages/Admin";
 import ManualRescrape from "./pages/ManualRescrape";
 import Bookmarks from "./pages/Bookmarks";
 import HistoryPage from "./pages/History";
+import Upload from "./pages/Upload";
+
 
 import type { Session } from "@supabase/supabase-js";
 
@@ -343,7 +346,15 @@ function App() {
                                         {userProfile?.is_admin && (
                                             <>
                                                 <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
-                                                <Link
+                                                                                    <Link 
+                                        to="/upload" 
+                                        onClick={() => setIsProfileMenuOpen(false)}
+                                        className="flex items-center gap-2 px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    >
+                                        <UploadIcon className="w-4 h-4" />
+                                        Upload Novel
+                                    </Link>
+                                    <Link
                                                     to="/admin"
                                                     className="flex items-center px-4 py-3 text-sm text-black dark:text-white hover:bg-gray-50 dark:hover:bg-gray-800 transition"
                                                     onClick={() =>
@@ -379,6 +390,7 @@ function App() {
                         <Route path="/read/:id" element={<Reader />} />
                         <Route path="/bookmarks" element={<Bookmarks />} />
                         <Route path="/history" element={<HistoryPage />} />
+                        <Route path="/upload" element={<Upload />} />
                         {userProfile?.is_admin && (
                             <>
                                 <Route path="/admin" element={<Admin />} />

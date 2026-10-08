@@ -1,7 +1,6 @@
-playwright
+DrissionPage
 psycopg2-binary
 requests
 supabase
 beautifulsoup4
 curl_cffi
-playwright-stealth
