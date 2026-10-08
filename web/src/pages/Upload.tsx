@@ -128,21 +128,28 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        // Match exactly: Chapter 1, Bab 1, Volume 1, Bagian 1, OR Bab I, Bab IV, etc. MUST be followed by a boundary
-        // Also match Prolog/Epilog/Kata Penutup
-        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:[\s:\-\.]|$)/i;
+        // Separate regex for volume and chapter
+        const volRegex = /^Volume\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)/i;
+        const chapRegex = /^(?:Chapter|Bab|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:[\s:\-\.]|$)/i;
+        
         const lines = text.split('\n');
         
         // 1. Find all candidate markers
-        const candidates: { lineIndex: number, title: string }[] = [];
+        let currentVolume = "";
+        const candidates: { lineIndex: number, title: string, volume: string }[] = [];
+        
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             // Skip page numbers or lines with dots (usually TOC)
             if (/^\d+$/.test(line) || /\.{2,}/.test(line)) continue; 
             
             // Validate it's a title (not too long, no trailing period, not a full paragraph)
-            if (regex.test(line) && line.length < 100 && !line.endsWith('.') && line.split(' ').length < 10) {
-                candidates.push({ lineIndex: i, title: line });
+            if (line.length < 100 && !line.endsWith('.') && line.split(' ').length < 10) {
+                if (volRegex.test(line)) {
+                    currentVolume = line; // Track volume but do NOT create a chapter marker
+                } else if (chapRegex.test(line)) {
+                    candidates.push({ lineIndex: i, title: line, volume: currentVolume });
+                }
             }
         }
         
@@ -152,14 +159,8 @@ export default function Upload() {
         
         const chapters: {title: string, content: string}[] = [];
         
-        // Add preamble (content before first marker) if any
+        // Extract preamble (content before first marker)
         const preambleContent = lines.slice(0, candidates[0].lineIndex).join('\n').trim();
-        if (preambleContent.length > 0) {
-            chapters.push({
-                title: "Bagian Awal",
-                content: preambleContent
-            });
-        }
         
         for (let i = 0; i < candidates.length; i++) {
             const marker = candidates[i];
@@ -168,23 +169,40 @@ export default function Upload() {
             const startIdx = marker.lineIndex + 1; // Content starts after the title
             const endIdx = nextMarker ? nextMarker.lineIndex : lines.length;
             
-            const content = lines.slice(startIdx, endIdx).join('\n').trim();
+            let content = lines.slice(startIdx, endIdx).join('\n').trim();
+            
+            // Prepend preamble into the FIRST real chapter (so illustrations aren't separated)
+            if (i === 0 && preambleContent.length > 0) {
+                content = preambleContent + "\n\n" + content;
+            }
+            
+            let finalTitle = marker.title;
+            // If we have a volume, prefix it so it groups under the same accordion in NovelDetails
+            if (marker.volume && !finalTitle.toLowerCase().includes('volume')) {
+                finalTitle = `${marker.volume} - ${finalTitle}`;
+            }
+            
             chapters.push({
-                title: marker.title,
+                title: finalTitle,
                 content: content
             });
         }
         
         // Filter out TOC clusters (chapters with virtually no content)
         const validChapters = chapters.filter((ch, idx) => {
-            // Always keep the first (preamble) and last (end of book) chapters
-            if (idx === 0 || idx === chapters.length - 1) return true;
+            // Always keep the last chapter (end of book)
+            if (idx === chapters.length - 1) return true;
             
             // If a middle chapter has less than 15 characters, it's likely a TOC entry
             if (ch.content.length < 15) return false;
             
             return true;
         });
+        
+        // Failsafe: if everything got filtered out
+        if (validChapters.length === 0) {
+            return [{ title: "Chapter 1", content: text }];
+        }
         
         return validChapters;
     };
