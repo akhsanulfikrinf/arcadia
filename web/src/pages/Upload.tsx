@@ -76,7 +76,7 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+[\dIVXLCDM]+/im;
+        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s*[\dIVXLCDM]+|^(?:Prologue|Epilogue)/im;
         const lines = text.split('\n');
         const chapters: {title: string, content: string}[] = [];
         
@@ -137,7 +137,7 @@ export default function Upload() {
 
         try {
             let novelId = "";
-            let startChapterIndex = 0;
+            let startChapterIndex = 1;
             let finalTitle = "";
 
             // Optional: Extract cover from the latest (last) PDF volume if no cover URL provided
