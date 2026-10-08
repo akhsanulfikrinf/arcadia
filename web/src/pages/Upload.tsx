@@ -130,7 +130,7 @@ export default function Upload() {
 
         // Match exactly: Chapter 1, Bab 1, Volume 1, Bagian 1, OR Bab I, Bab IV, etc. MUST be followed by a boundary
         // Also match Prolog/Epilog/Kata Penutup
-        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:\s|:|-|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:\s|:|-|$)/i;
+        const regex = /^(?:Chapter|Bab|Volume|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:[\s:\-\.]|$)/i;
         const lines = text.split('\n');
         
         // 1. Find all candidate markers
@@ -140,36 +140,20 @@ export default function Upload() {
             // Skip page numbers or lines with dots (usually TOC)
             if (/^\d+$/.test(line) || /\.{2,}/.test(line)) continue; 
             
-            if (regex.test(line) && line.length < 150) {
+            // Validate it's a title (not too long, no trailing period, not a full paragraph)
+            if (regex.test(line) && line.length < 100 && !line.endsWith('.') && line.split(' ').length < 10) {
                 candidates.push({ lineIndex: i, title: line });
             }
         }
         
-        // 2. Filter out TOC clusters (markers too close to each other)
-        const validMarkers: { lineIndex: number, title: string }[] = [];
-        for (let i = 0; i < candidates.length; i++) {
-            const current = candidates[i];
-            const prev = candidates[i - 1];
-            const next = candidates[i + 1];
-            
-            const distPrev = prev ? current.lineIndex - prev.lineIndex : Infinity;
-            const distNext = next ? next.lineIndex - current.lineIndex : Infinity;
-            
-            // If it's within 15 lines of another marker, it's a TOC entry.
-            if (distPrev < 15 || distNext < 15) continue;
-            
-            validMarkers.push(current);
-        }
-        
-        // 3. Split the text using valid markers
-        if (validMarkers.length === 0) {
+        if (candidates.length === 0) {
             return [{ title: "Chapter 1", content: text }];
         }
         
         const chapters: {title: string, content: string}[] = [];
         
         // Add preamble (content before first marker) if any
-        const preambleContent = lines.slice(0, validMarkers[0].lineIndex).join('\n').trim();
+        const preambleContent = lines.slice(0, candidates[0].lineIndex).join('\n').trim();
         if (preambleContent.length > 0) {
             chapters.push({
                 title: "Bagian Awal",
@@ -177,9 +161,9 @@ export default function Upload() {
             });
         }
         
-        for (let i = 0; i < validMarkers.length; i++) {
-            const marker = validMarkers[i];
-            const nextMarker = validMarkers[i + 1];
+        for (let i = 0; i < candidates.length; i++) {
+            const marker = candidates[i];
+            const nextMarker = candidates[i + 1];
             
             const startIdx = marker.lineIndex + 1; // Content starts after the title
             const endIdx = nextMarker ? nextMarker.lineIndex : lines.length;
@@ -191,7 +175,18 @@ export default function Upload() {
             });
         }
         
-        return chapters;
+        // Filter out TOC clusters (chapters with virtually no content)
+        const validChapters = chapters.filter((ch, idx) => {
+            // Always keep the first (preamble) and last (end of book) chapters
+            if (idx === 0 || idx === chapters.length - 1) return true;
+            
+            // If a middle chapter has less than 15 characters, it's likely a TOC entry
+            if (ch.content.length < 15) return false;
+            
+            return true;
+        });
+        
+        return validChapters;
     };
 
     const handleUpload = async () => {
