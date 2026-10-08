@@ -7,6 +7,9 @@ import { Upload as UploadIcon, FileText, Loader2, CheckCircle2, AlertCircle } fr
 // Setup PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
+const VOL_REGEX = /^Volume\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)/i;
+const CHAP_REGEX = /^(?:Chapter|Bab|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:[\s:\-\.]|$)/i;
+
 export default function Upload() {
     const [files, setFiles] = useState<File[]>([]);
     const [title, setTitle] = useState("");
@@ -76,6 +79,8 @@ export default function Upload() {
                 let pageText = "";
                 let lastY = -1;
                 let lineStartX = -1;
+                let currentLineText = "";
+                let lastFontSize = -1;
                 
                 for (const item of textItems) {
                     const x = Math.round(item.transform[4]);
@@ -85,10 +90,15 @@ export default function Upload() {
                     
                     if (lastY !== -1 && yDiff > 4) {
                         // Check if it's a new paragraph or just line wrap
-                        const isLargeGap = yDiff > Math.max(15, fontSize * 1.5);
+                        const isLargeGap = yDiff > Math.max(12, fontSize * 1.3);
                         const isIndented = lineStartX !== -1 && (x - lineStartX) > fontSize * 1.2;
+                        const isFontSizeChanged = lastFontSize !== -1 && Math.abs(fontSize - lastFontSize) > 1;
                         
-                        if (isLargeGap || isIndented) {
+                        const trimmedLine = currentLineText.trim();
+                        const isAfterTitle = trimmedLine.length > 0 && trimmedLine.split(' ').length < 10 && !trimmedLine.endsWith('.') &&
+                                             (VOL_REGEX.test(trimmedLine) || CHAP_REGEX.test(trimmedLine));
+                        
+                        if (isLargeGap || isIndented || isFontSizeChanged || isAfterTitle) {
                             pageText += "\n";
                         } else {
                             if (!pageText.endsWith(" ") && !pageText.endsWith("-")) {
@@ -96,6 +106,7 @@ export default function Upload() {
                             }
                         }
                         lineStartX = x;
+                        currentLineText = "";
                     } else if (lastY !== -1 && item.str.trim() !== "" && !pageText.endsWith(" ")) {
                         pageText += " ";
                     } else if (lastY === -1) {
@@ -103,7 +114,9 @@ export default function Upload() {
                     }
                     
                     pageText += item.str;
+                    currentLineText += item.str;
                     lastY = y;
+                    lastFontSize = fontSize;
                 }
 
                 // Strip header, footer, page number
@@ -128,10 +141,6 @@ export default function Upload() {
             return [{ title: "Chapter 1", content: text }];
         }
 
-        // Separate regex for volume and chapter
-        const volRegex = /^Volume\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)/i;
-        const chapRegex = /^(?:Chapter|Bab|Bagian)\s+(?:\d+|[IVXLCDM]+)(?:[\s:\-\.]|$)|^(?:Prologue|Prolog|Epilogue|Epilog|Kata Penutup)(?:[\s:\-\.]|$)/i;
-        
         const lines = text.split('\n');
         
         // 1. Find all candidate markers
@@ -145,9 +154,9 @@ export default function Upload() {
             
             // Validate it's a title (not too long, no trailing period, not a full paragraph)
             if (line.length < 100 && !line.endsWith('.') && line.split(' ').length < 10) {
-                if (volRegex.test(line)) {
+                if (VOL_REGEX.test(line)) {
                     currentVolume = line; // Track volume but do NOT create a chapter marker
-                } else if (chapRegex.test(line)) {
+                } else if (CHAP_REGEX.test(line)) {
                     candidates.push({ lineIndex: i, title: line, volume: currentVolume });
                 }
             }
