@@ -254,6 +254,9 @@ export default function NovelDetails() {
                                     >
                                         <Edit2 className="w-5 h-5" />
                                     </button>
+                                        <Link to={`/novel/${novel.id}/illustrations`} className="p-2 text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition shrink-0" title="Manage Illustrations">
+                                            <ImagePlus className="w-5 h-5" />
+                                        </Link>
                                 </>
                             )}
                         </div>
