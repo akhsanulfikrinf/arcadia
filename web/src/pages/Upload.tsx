@@ -46,7 +46,7 @@ export default function Upload() {
                 setProgressStr(`Reading PDF page ${i} of ${pdf.numPages}...`);
                 const page = await pdf.getPage(i);
                 const content = await page.getTextContent();
-                const pageText = content.items.map((item: { str: string }) => item.str).join(" ");
+                const pageText = content.items.map((item) => ('str' in item ? item.str : "")).join(" ");
                 fullText += pageText + "\n\n";
             }
             return fullText;
