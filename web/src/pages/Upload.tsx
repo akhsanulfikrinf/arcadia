@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import mammoth from "mammoth";
 import * as pdfjsLib from "pdfjs-dist";
@@ -13,17 +13,33 @@ export default function Upload() {
     const [coverUrl, setCoverUrl] = useState("");
     const [splitChapters, setSplitChapters] = useState(true);
     
+    const [isExistingNovel, setIsExistingNovel] = useState(false);
+    const [existingNovels, setExistingNovels] = useState<{id: string, title: string}[]>([]);
+    const [selectedNovelId, setSelectedNovelId] = useState("");
+    
     const [isProcessing, setIsProcessing] = useState(false);
     const [progressStr, setProgressStr] = useState("");
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
 
+    useEffect(() => {
+        const fetchNovels = async () => {
+            const { data } = await supabase.from('novels').select('id, title').order('title');
+            if (data) {
+                setExistingNovels(data);
+                if (data.length > 0) setSelectedNovelId(data[0].id);
+            }
+        };
+        fetchNovels();
+    }, []);
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             const selectedFiles = Array.from(e.target.files).sort((a, b) => a.name.localeCompare(b.name));
             setFiles(selectedFiles);
-            // Default title from first filename, stripping volume/chapter identifiers
-            setTitle(selectedFiles[0].name.replace(/\.[^/.]+$/, "").replace(/\s*(volume|vol|bab|chapter|bagian)\s*\d+/i, "").trim());
+            if (!isExistingNovel) {
+                setTitle(selectedFiles[0].name.replace(/\.[^/.]+$/, "").replace(/\s*(volume|vol|bab|chapter|bagian)\s*\d+/i, "").trim());
+            }
             setError("");
             setSuccess("");
         }
@@ -104,7 +120,13 @@ export default function Upload() {
             setError("Please select at least one file.");
             return;
         }
-        if (!title.trim()) {
+        
+        if (isExistingNovel && !selectedNovelId) {
+            setError("Please select an existing novel from the list.");
+            return;
+        }
+        
+        if (!isExistingNovel && !title.trim()) {
             setError("Please enter a novel title.");
             return;
         }
@@ -114,9 +136,9 @@ export default function Upload() {
         setSuccess("");
 
         try {
-            setProgressStr("Checking database for existing novel...");
             let novelId = "";
             let startChapterIndex = 0;
+            let finalTitle = "";
 
             // Optional: Extract cover from the latest (last) PDF volume if no cover URL provided
             let coverBlob: Blob | null = null;
@@ -145,18 +167,12 @@ export default function Upload() {
                 }
             }
 
-            // Check if novel already exists
-            const { data: existingNovel, error: searchErr } = await supabase
-                .from('novels')
-                .select('id')
-                .ilike('title', title.trim())
-                .maybeSingle();
-
-            if (searchErr) throw searchErr;
-
-            if (existingNovel) {
-                novelId = existingNovel.id;
-                // Get max chapter index
+            if (isExistingNovel) {
+                novelId = selectedNovelId;
+                const selectedNovel = existingNovels.find(n => n.id === novelId);
+                finalTitle = selectedNovel ? selectedNovel.title : "Unknown Novel";
+                
+                setProgressStr("Fetching existing novel data...");
                 const { data: lastChapter } = await supabase
                     .from('chapters')
                     .select('chapter_index')
@@ -169,20 +185,43 @@ export default function Upload() {
                     startChapterIndex = lastChapter.chapter_index + 1;
                 }
             } else {
-                // Create new novel
-                const fakeUrl = `https://manual-upload/${Date.now()}`;
-                const { data: newNovel, error: createErr } = await supabase
+                finalTitle = title.trim();
+                setProgressStr("Checking database for existing novel...");
+                // Keep the fail-safe check in case they typed an existing title
+                const { data: existingNovel, error: searchErr } = await supabase
                     .from('novels')
-                    .insert({
-                        title: title.trim(),
-                        url: fakeUrl,
-                        cover_url: coverUrl.trim() || null
-                    })
                     .select('id')
-                    .single();
-                
-                if (createErr || !newNovel) throw createErr || new Error("Failed to create novel.");
-                novelId = newNovel.id;
+                    .ilike('title', finalTitle)
+                    .maybeSingle();
+
+                if (searchErr) throw searchErr;
+
+                if (existingNovel) {
+                    novelId = existingNovel.id;
+                    const { data: lastChapter } = await supabase
+                        .from('chapters')
+                        .select('chapter_index')
+                        .eq('novel_id', novelId)
+                        .order('chapter_index', { ascending: false })
+                        .limit(1)
+                        .single();
+                    if (lastChapter) startChapterIndex = lastChapter.chapter_index + 1;
+                } else {
+                    // Create new novel
+                    const fakeUrl = `https://manual-upload/${Date.now()}`;
+                    const { data: newNovel, error: createErr } = await supabase
+                        .from('novels')
+                        .insert({
+                            title: finalTitle,
+                            url: fakeUrl,
+                            cover_url: coverUrl.trim() || null
+                        })
+                        .select('id')
+                        .single();
+                    
+                    if (createErr || !newNovel) throw createErr || new Error("Failed to create novel.");
+                    novelId = newNovel.id;
+                }
             }
 
             // Upload the extracted cover image if one was generated
@@ -255,11 +294,9 @@ export default function Upload() {
                 }
             }
 
-            setSuccess(existingNovel 
-                ? `Successfully appended ${globalCompletedCount} chapters to existing novel "${title}"!`
-                : `Successfully uploaded new novel "${title}" with ${globalCompletedCount} chapters!`);
+            setSuccess(`Successfully uploaded ${globalCompletedCount} chapters to "${finalTitle}"!`);
             setFiles([]);
-            setTitle("");
+            if (!isExistingNovel) setTitle("");
             setCoverUrl("");
             
         } catch (err: unknown) {
@@ -307,28 +344,59 @@ export default function Upload() {
 
                 {/* Meta Inputs */}
                 <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Novel Title</label>
+                    
+                    <label className="flex items-center gap-2 cursor-pointer bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800">
                         <input
-                            type="text"
-                            className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder="e.g. Overlord"
+                            type="checkbox"
+                            checked={isExistingNovel}
+                            onChange={(e) => setIsExistingNovel(e.target.checked)}
+                            className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-600"
                             disabled={isProcessing}
                         />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Cover Image URL (Optional)</label>
-                        <input
-                            type="text"
-                            className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
-                            value={coverUrl}
-                            onChange={(e) => setCoverUrl(e.target.value)}
-                            placeholder="https://example.com/cover.jpg"
-                            disabled={isProcessing}
-                        />
-                    </div>
+                        <span className="text-sm font-medium text-blue-900 dark:text-blue-200">Append to Existing Novel in Library</span>
+                    </label>
+
+                    {isExistingNovel ? (
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Select Novel</label>
+                            <select
+                                className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
+                                value={selectedNovelId}
+                                onChange={(e) => setSelectedNovelId(e.target.value)}
+                                disabled={isProcessing || existingNovels.length === 0}
+                            >
+                                {existingNovels.length === 0 && <option value="">No novels found in database...</option>}
+                                {existingNovels.map(n => (
+                                    <option key={n.id} value={n.id}>{n.title}</option>
+                                ))}
+                            </select>
+                        </div>
+                    ) : (
+                        <>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Novel Title</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="e.g. Overlord"
+                                    disabled={isProcessing}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Cover Image URL (Optional)</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:border-zinc-400"
+                                    value={coverUrl}
+                                    onChange={(e) => setCoverUrl(e.target.value)}
+                                    placeholder="Leave empty to auto-extract from PDF"
+                                    disabled={isProcessing}
+                                />
+                            </div>
+                        </>
+                    )}
                     
                     <label className="flex items-center gap-2 cursor-pointer">
                         <input
@@ -361,7 +429,7 @@ export default function Upload() {
                 <div className="pt-4 flex justify-end">
                     <button
                         onClick={handleUpload}
-                        disabled={files.length === 0 || !title || isProcessing}
+                        disabled={files.length === 0 || (isExistingNovel ? !selectedNovelId : !title) || isProcessing}
                         className="px-6 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         {isProcessing ? (
