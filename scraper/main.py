@@ -86,13 +86,17 @@ def _get_antibrow_browser():
             return None
         
         try:
+            api_key = os.environ.get("ANTIBROW_API_KEY") or os.environ.get("ANTI_DETECT_BROWSER_KEY")
             print("[antibrow] Launching anti-detect browser (real device fingerprint)...")
-            _antibrow_browser = launch(
+            launch_kwargs = dict(
                 profile="ln-reader-scraper",
                 headless=True,
                 temporary=True,       # Don't clutter the profile manager
                 focus_window=False,    # Don't steal focus
             )
+            if api_key:
+                launch_kwargs["api_key"] = api_key
+            _antibrow_browser = launch(**launch_kwargs)
             print(f"[antibrow] Browser ready. Persona: {_antibrow_browser.persona.get('ua', 'unknown')[:80]}...")
             return _antibrow_browser
         except Exception as e:
@@ -869,54 +873,38 @@ def get_chapters(novel_url):
 
         # Run the same extraction JS script
         script = """
-            async function extractData() {
+            (function() {
                 // 1. Title
-                let title = '';
-                const titleEl = document.querySelector('.post-title h1, .post-title h3, h1');
+                var title = '';
+                var titleEl = document.querySelector('.post-title h1, .post-title h3, h1');
                 if (titleEl && titleEl.innerText.trim()) {
                     title = titleEl.innerText.trim();
                 } else {
                     title = document.title.split('-')[0].trim();
                 }
 
-                // 2. Cover (and fetch as base64)
-                let cover_url = null;
-                let cover_base64 = null;
-                const img = document.querySelector('.summary_image img');
+                // 2. Cover URL (no base64 in sync mode)
+                var cover_url = null;
+                var img = document.querySelector('.summary_image img');
                 if (img) {
                     cover_url = img.dataset.src || img.dataset.lazySrc || img.src;
-                    if (cover_url) {
-                        try {
-                            let resp = await fetch(cover_url);
-                            let blob = await resp.blob();
-                            cover_base64 = await new Promise((resolve, reject) => {
-                                let reader = new FileReader();
-                                reader.onloadend = () => resolve(reader.result);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-                        } catch(e) {
-                            console.error('Failed to fetch cover image:', e);
-                        }
-                    }
                 }
 
-                // 3. Chapters via in-browser AJAX fetch
-                let chapters = [];
+                // 3. Chapters via sync XMLHttpRequest
+                var chapters = [];
                 try {
-                    let ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
-                    let resp = await fetch(ajaxUrl, {
-                        method: 'POST',
-                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                    });
-                    if (resp.status === 200) {
-                        let html = await resp.text();
-                        let parser = new DOMParser();
-                        let doc = parser.parseFromString(html, 'text/html');
-                        let seen = new Set();
-                        doc.querySelectorAll('.wp-manga-chapter a').forEach(a => {
-                            let h = a.href;
-                            let t = a.innerText.trim();
+                    var ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', ajaxUrl, false);
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                    xhr.send();
+                    if (xhr.status === 200) {
+                        var parser = new DOMParser();
+                        var doc = parser.parseFromString(xhr.responseText, 'text/html');
+                        var seen = new Set();
+                        doc.querySelectorAll('.wp-manga-chapter a').forEach(function(a) {
+                            var h = a.href;
+                            var t = a.innerText.trim();
                             if (h && t && !seen.has(h)) {
                                 seen.add(h);
                                 chapters.push({ title: t, url: h });
@@ -928,14 +916,14 @@ def get_chapters(novel_url):
                     }
                 } catch(e) {}
 
-                // 4. Fallback: inspect DOM directly if chapters are already present in page
+                // 4. Fallback: inspect DOM directly
                 if (chapters.length === 0) {
-                    let seen = new Set();
-                    document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
-                        let h = a.href;
-                        let t = a.innerText.trim();
-                        if (h && t && !seen.has(h)) {
-                            seen.add(h);
+                    var seen2 = new Set();
+                    document.querySelectorAll('.wp-manga-chapter a').forEach(function(a) {
+                        var h = a.href;
+                        var t = a.innerText.trim();
+                        if (h && t && !seen2.has(h)) {
+                            seen2.add(h);
                             chapters.push({ title: t, url: h });
                         }
                     });
@@ -947,7 +935,7 @@ def get_chapters(novel_url):
                 return {
                     title: title,
                     cover_url: cover_url,
-                    cover_base64: cover_base64,
+                    cover_base64: null,
                     chapters: chapters,
                     debug: {
                         pageTitle: document.title,
@@ -958,8 +946,7 @@ def get_chapters(novel_url):
                         bodyLength: document.body.innerHTML.length
                     }
                 };
-            }
-            return await extractData();
+            })()
         """
         extracted = page.run_js(script)
         
