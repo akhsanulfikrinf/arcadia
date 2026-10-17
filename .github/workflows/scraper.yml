@@ -43,5 +43,6 @@ jobs:
                   NOVEL_URL: ${{ github.event.inputs.novel_url }}
                   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
                   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+                  ANTIBROW_API_KEY: ${{ secrets.ANTIBROW_API_KEY }}
               run: |
                   python scraper/main.py
