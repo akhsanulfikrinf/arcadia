@@ -110,6 +110,8 @@ def _get_antibrow_browser():
                 headless=True,
                 temporary=True,       # Don't clutter the profile manager
                 focus_window=False,    # Don't steal focus
+                os="windows",          # Real Windows Chrome persona
+                args=["--fp-cdp-attach-iframes"],  # Access cross-origin Turnstile iframes
             )
             if api_key:
                 launch_kwargs["api_key"] = api_key
@@ -117,7 +119,7 @@ def _get_antibrow_browser():
             if proxy:
                 launch_kwargs["proxy"] = proxy
             _antibrow_browser = launch(**launch_kwargs)
-            persona_os = getattr(_antibrow_browser.persona, "os", "desktop")
+            persona_os = getattr(_antibrow_browser.persona, "os", "windows")
             print(f"[antibrow] Browser ready (profile={launch_kwargs.get('profile')}, OS={persona_os}).")
             return _antibrow_browser
         except Exception as e:
@@ -381,12 +383,41 @@ def _antibrow_get_page_html(url, wait_for_selector=None, timeout=30):
         
         # Wait for Cloudflare challenge to resolve (if present)
         # antibrow's real fingerprint means CF usually passes immediately,
-        # but we still wait in case of a JS challenge
-        for _ in range(25):
+        # but if an interactive Turnstile checkbox is shown on datacenter IPs, we click it.
+        for attempt in range(25):
             title = page.title()
             if 'Just a moment' not in title and 'Checking' not in title:
                 break
-            print("  [antibrow] Cloudflare challenge detected, waiting...")
+            print(f"  [antibrow] Cloudflare challenge detected (attempt {attempt+1}/25)...")
+            
+            # Attempt clicking Turnstile checkbox if present
+            if attempt >= 1:
+                try:
+                    for frame in page.frames:
+                        if "cloudflare" in frame.url or "turnstile" in frame.url:
+                            for sel in ['input[type="checkbox"]', '.ctp-checkbox-label', '#challenge-stage']:
+                                el = frame.locator(sel)
+                                if el.count() > 0:
+                                    box = el.first.bounding_box()
+                                    if box:
+                                        print(f"  [antibrow] Clicking Turnstile element ({sel})...")
+                                        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=5)
+                                        page.mouse.down()
+                                        time.sleep(0.1)
+                                        page.mouse.up()
+                                        break
+                    cf_iframe = page.locator('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]')
+                    if cf_iframe.count() > 0:
+                        box = cf_iframe.first.bounding_box()
+                        if box and box["width"] > 0:
+                            print("  [antibrow] Clicking Turnstile iframe area...")
+                            page.mouse.move(box["x"] + 30, box["y"] + box["height"] / 2, steps=5)
+                            page.mouse.down()
+                            time.sleep(0.1)
+                            page.mouse.up()
+                except Exception:
+                    pass
+
             time.sleep(2)
         
         # Wait for actual content if selector specified
