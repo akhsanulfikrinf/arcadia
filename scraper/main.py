@@ -86,6 +86,23 @@ def _get_antibrow_browser():
             return None
         
         try:
+            # Ensure virtual display on headless Linux if DISPLAY is not set
+            if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+                import shutil
+                import subprocess
+                if shutil.which("Xvfb"):
+                    try:
+                        print("[antibrow] No $DISPLAY found. Starting Xvfb on :99...")
+                        subprocess.Popen(
+                            ["Xvfb", ":99", "-screen", "0", "1280x1024x24", "-ac"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        os.environ["DISPLAY"] = ":99"
+                        time.sleep(1)
+                    except Exception as err:
+                        print(f"[antibrow] Warning: Could not start Xvfb: {err}")
+
             api_key = os.environ.get("ANTIBROW_API_KEY") or os.environ.get("ANTI_DETECT_BROWSER_KEY")
             print("[antibrow] Launching anti-detect browser (real device fingerprint)...")
             launch_kwargs = dict(
@@ -858,7 +875,7 @@ def get_chapters(novel_url):
         page.get(novel_url, retry=2, interval=3)
         
         # Wait for CF challenge to resolve (check title)
-        for _ in range(15):
+        for _ in range(25):
             title = page.title
             if 'Just a moment' not in title and 'Checking' not in title:
                 break
@@ -866,14 +883,17 @@ def get_chapters(novel_url):
             time.sleep(2)
             
         # Verify content
-        if not page.ele('.post-title', timeout=5) and not page.eles('tag:a', timeout=2):
-            print(f"  [DrissionPage] Page loaded but no content detected.")
-        else:
+        title = page.title
+        if 'Just a moment' in title or 'Checking' in title:
+            print(f"  [DrissionPage] Cloudflare challenge not resolved in time.")
+        elif page.ele('.post-title', timeout=5) or page.ele('.wp-manga-chapter', timeout=2):
             print(f"  [DrissionPage] Cloudflare challenge resolved!")
+        else:
+            print(f"  [DrissionPage] Page loaded, attempting extraction...")
 
-        # Run the same extraction JS script
+        # Run extraction JS script (must use return keyword for DrissionPage run_js)
         script = """
-            (function() {
+            return (function() {
                 // 1. Title
                 var title = '';
                 var titleEl = document.querySelector('.post-title h1, .post-title h3, h1');

@@ -45,4 +45,4 @@ jobs:
                   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
                   ANTIBROW_API_KEY: ${{ secrets.ANTIBROW_API_KEY }}
               run: |
-                  python scraper/main.py
+                  xvfb-run -a python scraper/main.py
