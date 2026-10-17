@@ -11,7 +11,7 @@ import psycopg2
 from psycopg2 import pool
 from utils.storage import SupabaseStorage
 
-# --- curl_cffi setup with diagnostic logging ---
+# --- curl_cffi setup (fast fallback when no CF challenge) ---
 CFFI_AVAILABLE = False
 CFFI_IMPERSONATE = None
 cffi_session = None
@@ -47,6 +47,70 @@ if cffi_session is None:
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
     })
+
+# --- antibrow (anti-detect browser) setup ---
+ANTIBROW_AVAILABLE = False
+_antibrow_browser = None  # Shared browser session (lazy-initialized)
+_antibrow_lock = threading.Lock()  # Thread-safe browser access
+
+try:
+    from antibrow import launch
+    ANTIBROW_AVAILABLE = True
+    print("INFO: antibrow loaded successfully. Anti-detect browser available for Cloudflare bypass.")
+except ImportError:
+    print("WARNING: antibrow not installed. Run: pip install antibrow")
+    print("         Scraper will rely on curl_cffi only (may get blocked by Cloudflare).")
+except Exception as e:
+    print(f"WARNING: antibrow failed to load: {e}")
+
+
+def _get_antibrow_browser():
+    """Get or create a shared antibrow browser session (thread-safe, lazy init).
+    
+    Uses a single persistent profile so the session stays logged in and 
+    cookies accumulate across requests — just like a real user.
+    """
+    global _antibrow_browser
+    
+    with _antibrow_lock:
+        if _antibrow_browser is not None:
+            # Check if browser is still alive
+            try:
+                _ = _antibrow_browser.pages
+                return _antibrow_browser
+            except Exception:
+                print("[antibrow] Previous session died. Restarting...")
+                _antibrow_browser = None
+        
+        if not ANTIBROW_AVAILABLE:
+            return None
+        
+        try:
+            print("[antibrow] Launching anti-detect browser (real device fingerprint)...")
+            _antibrow_browser = launch(
+                profile="ln-reader-scraper",
+                headless=True,
+                temporary=True,       # Don't clutter the profile manager
+                focus_window=False,    # Don't steal focus
+            )
+            print(f"[antibrow] Browser ready. Persona: {_antibrow_browser.persona.get('ua', 'unknown')[:80]}...")
+            return _antibrow_browser
+        except Exception as e:
+            print(f"[antibrow] Failed to launch: {e}")
+            _antibrow_browser = None
+            return None
+
+
+def _close_antibrow_browser():
+    """Close the shared antibrow browser session."""
+    global _antibrow_browser
+    with _antibrow_lock:
+        if _antibrow_browser is not None:
+            try:
+                _antibrow_browser.close()
+            except Exception:
+                pass
+            _antibrow_browser = None
 
 
 def clean_database_url(raw_url: str) -> str:
@@ -266,17 +330,68 @@ def cffi_post(url, headers=None, timeout=20):
         return cffi_session.post(url, headers=headers, timeout=timeout)
 
 
-def scrape_chapter(url):
-    """Scrape a single chapter with retry + exponential backoff.
+def _antibrow_get_page_html(url, wait_for_selector=None, timeout=30):
+    """Navigate to a URL using the shared antibrow browser and return the page HTML.
     
-    Uses curl_cffi with TLS impersonation (no Playwright fallback — Playwright 
-    from datacenter IPs always gets Cloudflare-blocked anyway).
+    This bypasses Cloudflare because antibrow runs a real Chromium with 
+    kernel-level fingerprint spoofing — no JS patches that CF can detect.
+    
+    Args:
+        url: The URL to navigate to.
+        wait_for_selector: Optional CSS selector to wait for before extracting HTML.
+        timeout: Navigation timeout in seconds.
+    
+    Returns:
+        (html_text, page) tuple, or (None, None) on failure.
+    """
+    browser = _get_antibrow_browser()
+    if browser is None:
+        return None, None
+    
+    try:
+        page = browser.new_page()
+        
+        # Navigate with timeout
+        page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+        
+        # Wait for Cloudflare challenge to resolve (if present)
+        # antibrow's real fingerprint means CF usually passes immediately,
+        # but we still wait in case of a JS challenge
+        for _ in range(15):
+            title = page.title()
+            if 'Just a moment' not in title and 'Checking' not in title:
+                break
+            time.sleep(2)
+        
+        # Wait for actual content if selector specified
+        if wait_for_selector:
+            try:
+                page.wait_for_selector(wait_for_selector, timeout=10000)
+            except Exception:
+                pass  # Content might be loaded differently
+        
+        # Small delay for any lazy-loaded content
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        html = page.content()
+        return html, page
+        
+    except Exception as e:
+        print(f"  [antibrow] Navigation error: {e}")
+        return None, None
+
+
+def scrape_chapter(url):
+    """Scrape a single chapter. Strategy:
+    
+    1. Try curl_cffi first (fast, no browser overhead)
+    2. If Cloudflare blocks → use antibrow (anti-detect browser with real fingerprint)
     """
     base_delay = 2.0
     
+    # --- Strategy 1: curl_cffi (fast path) ---
     for attempt in range(MAX_CHAPTER_RETRIES):
         try:
-            # Jitter delay: increases with each retry
             delay = random.uniform(0.5, 1.5) + (base_delay * attempt)
             time.sleep(delay)
             
@@ -313,6 +428,44 @@ def scrape_chapter(url):
             if attempt < MAX_CHAPTER_RETRIES - 1:
                 backoff = base_delay * (2 ** attempt) + random.uniform(1, 3)
                 time.sleep(backoff)
+    
+    # --- Strategy 2: antibrow (anti-detect browser for CF bypass) ---
+    if ANTIBROW_AVAILABLE:
+        print(f"  [antibrow] curl_cffi failed, using anti-detect browser for: {url}")
+        
+        for attempt in range(2):  # 2 attempts with antibrow
+            try:
+                html, page = _antibrow_get_page_html(url, wait_for_selector='.reading-content')
+                
+                if page is not None:
+                    try:
+                        if html and 'reading-content' in html:
+                            blocks = extract_blocks_from_html(html)
+                            if blocks and len(blocks) > 0:
+                                print(f"  [antibrow] Successfully scraped chapter (attempt {attempt+1})")
+                                return blocks
+                            else:
+                                print(f"  [antibrow] Empty blocks after parsing (attempt {attempt+1})")
+                        elif html and 'Just a moment' in html:
+                            print(f"  [antibrow] CF challenge still present (attempt {attempt+1})")
+                            time.sleep(5)  # Wait longer for challenge resolution
+                        else:
+                            print(f"  [antibrow] No .reading-content in page (attempt {attempt+1})")
+                    finally:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                else:
+                    print(f"  [antibrow] Failed to get page (attempt {attempt+1})")
+                    
+                if attempt < 1:
+                    time.sleep(random.uniform(2, 4))
+                    
+            except Exception as e:
+                print(f"  [antibrow] Error: {e} (attempt {attempt+1})")
+                if attempt < 1:
+                    time.sleep(random.uniform(2, 4))
     
     return []
 
@@ -429,7 +582,7 @@ def worker(q, novel_id):
             else:
                 with stats_lock:
                     stats['skipped'] += 1
-                print(f"SKIPPING: [{idx}] {ch['title']} - No content found after {MAX_CHAPTER_RETRIES} attempts")
+                print(f"SKIPPING: [{idx}] {ch['title']} - No content found after all attempts")
 
         except Exception as e:
             with stats_lock:
@@ -540,22 +693,154 @@ def get_chapters(novel_url):
                 backoff = base_delay * (2 ** attempt) + random.uniform(2, 5)
                 time.sleep(backoff)
 
-        # --- Strategy 2: DrissionPage (Local Chrome/Edge for strong CF bypass) ---
+    # --- Strategy 2: antibrow (anti-detect browser for CF bypass) ---
+    if ANTIBROW_AVAILABLE:
+        print("[get_chapters] Falling back to antibrow (anti-detect browser)...")
+        
+        try:
+            html, page = _antibrow_get_page_html(novel_url, wait_for_selector='.post-title')
+            
+            if page is not None and html:
+                try:
+                    # Check if CF challenge was bypassed
+                    if 'Just a moment' in html:
+                        print("  [antibrow] Cloudflare challenge still present after wait.")
+                        raise Exception("CF challenge not resolved")
+                    
+                    # Run the same extraction via Playwright JS in the real browser
+                    script = """
+                        async () => {
+                            // 1. Title
+                            let title = '';
+                            const titleEl = document.querySelector('.post-title h1, .post-title h3, h1');
+                            if (titleEl && titleEl.innerText.trim()) {
+                                title = titleEl.innerText.trim();
+                            } else {
+                                title = document.title.split('-')[0].trim();
+                            }
+
+                            // 2. Cover (and fetch as base64)
+                            let cover_url = null;
+                            let cover_base64 = null;
+                            const img = document.querySelector('.summary_image img');
+                            if (img) {
+                                cover_url = img.dataset.src || img.dataset.lazySrc || img.src;
+                                if (cover_url) {
+                                    try {
+                                        let resp = await fetch(cover_url);
+                                        let blob = await resp.blob();
+                                        cover_base64 = await new Promise((resolve, reject) => {
+                                            let reader = new FileReader();
+                                            reader.onloadend = () => resolve(reader.result);
+                                            reader.onerror = reject;
+                                            reader.readAsDataURL(blob);
+                                        });
+                                    } catch(e) {
+                                        console.error('Failed to fetch cover image:', e);
+                                    }
+                                }
+                            }
+
+                            // 3. Chapters via in-browser AJAX fetch
+                            let chapters = [];
+                            try {
+                                let ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
+                                let resp = await fetch(ajaxUrl, {
+                                    method: 'POST',
+                                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                                });
+                                if (resp.status === 200) {
+                                    let html = await resp.text();
+                                    let parser = new DOMParser();
+                                    let doc = parser.parseFromString(html, 'text/html');
+                                    let seen = new Set();
+                                    doc.querySelectorAll('.wp-manga-chapter a').forEach(a => {
+                                        let h = a.href;
+                                        let t = a.innerText.trim();
+                                        if (h && t && !seen.has(h)) {
+                                            seen.add(h);
+                                            chapters.push({ title: t, url: h });
+                                        }
+                                    });
+                                    if (chapters.length > 0) {
+                                        chapters.reverse();
+                                    }
+                                }
+                            } catch(e) {}
+
+                            // 4. Fallback: inspect DOM directly if chapters are already present in page
+                            if (chapters.length === 0) {
+                                let seen = new Set();
+                                document.querySelectorAll('.wp-manga-chapter a').forEach(a => {
+                                    let h = a.href;
+                                    let t = a.innerText.trim();
+                                    if (h && t && !seen.has(h)) {
+                                        seen.add(h);
+                                        chapters.push({ title: t, url: h });
+                                    }
+                                });
+                                if (chapters.length > 0) {
+                                    chapters.reverse();
+                                }
+                            }
+
+                            return {
+                                title: title,
+                                cover_url: cover_url,
+                                cover_base64: cover_base64,
+                                chapters: chapters,
+                                debug: {
+                                    pageTitle: document.title,
+                                    url: window.location.href,
+                                    hasPostTitle: !!document.querySelector('.post-title'),
+                                    hasMangaChapter: document.querySelectorAll('.wp-manga-chapter').length,
+                                    totalLinks: document.querySelectorAll('a').length,
+                                    bodyLength: document.body.innerHTML.length
+                                }
+                            };
+                        }
+                    """
+                    extracted = page.evaluate(script)
+                    
+                    if not extracted:
+                        raise Exception("Failed to execute extraction script in browser")
+                    
+                    title = extracted.get('title') or "Unknown Title"
+                    cover_url = extracted.get('cover_url')
+                    cover_base64 = extracted.get('cover_base64')
+                    links = extracted.get('chapters') or []
+                    debug = extracted.get('debug', {})
+
+                    if not links:
+                        print(f"  [antibrow] Debug info: {debug}")
+                        raise Exception(f"No chapters found for {novel_url}. Is the selector correct?")
+                        
+                    print(f"[antibrow] Successfully extracted {len(links)} chapters for: {title}")
+                    return title, cover_url, cover_base64, links
+                    
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+            else:
+                raise Exception("antibrow failed to load page")
+                
+        except Exception as e:
+            print(f"  [antibrow] get_chapters error: {e}")
+    
+    # --- Strategy 3: DrissionPage (legacy fallback) ---
     print("[get_chapters] Falling back to DrissionPage (local Chromium)...")
     
     try:
         from DrissionPage import ChromiumPage, ChromiumOptions
     except ImportError:
-        raise Exception("DrissionPage not installed. Please run: pip install DrissionPage")
+        raise Exception("All scraping strategies failed. DrissionPage not installed. Please run: pip install DrissionPage")
 
     # Set up DrissionPage options
     co = ChromiumOptions()
     if HEADLESS:
         co.headless()
-    
-    # Try to find a local browser (Chrome/Edge/Brave). 
-    # DrissionPage auto-detects by default, but we can set common paths if needed.
-    # co.set_browser_path(r'C:\Program Files\Google\Chrome\Application\chrome.exe')
     
     co.set_argument('--no-sandbox')
     co.set_argument('--disable-gpu')
@@ -619,7 +904,7 @@ def get_chapters(novel_url):
                 // 3. Chapters via in-browser AJAX fetch
                 let chapters = [];
                 try {
-                    let ajaxUrl = window.location.href.replace(/\/?$/, '/ajax/chapters/');
+                    let ajaxUrl = window.location.href.replace(/\\/?$/, '/ajax/chapters/');
                     let resp = await fetch(ajaxUrl, {
                         method: 'POST',
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -744,6 +1029,9 @@ def run(target_url=None):
         mode_str = "force overwrite" if is_force else "smart sync (fill missing/new)"
         print(f"Scraping single novel: {clean_url} [{mode_str}]")
         run_single_novel(clean_url, force=is_force)
+    
+    # Clean up antibrow browser at the end
+    _close_antibrow_browser()
 
 
 def run_single_novel(novel_url, force=False):

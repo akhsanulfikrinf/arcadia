@@ -4,3 +4,5 @@ requests
 supabase
 beautifulsoup4
 curl_cffi
+antibrow
+playwright
