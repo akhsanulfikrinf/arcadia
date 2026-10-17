@@ -44,5 +44,6 @@ jobs:
                   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
                   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
                   ANTIBROW_API_KEY: ${{ secrets.ANTIBROW_API_KEY }}
+                  PROXY_URL: ${{ secrets.PROXY_URL }}
               run: |
                   xvfb-run -a python scraper/main.py

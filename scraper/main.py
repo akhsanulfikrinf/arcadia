@@ -113,8 +113,12 @@ def _get_antibrow_browser():
             )
             if api_key:
                 launch_kwargs["api_key"] = api_key
+            proxy = os.environ.get("PROXY_URL")
+            if proxy:
+                launch_kwargs["proxy"] = proxy
             _antibrow_browser = launch(**launch_kwargs)
-            print(f"[antibrow] Browser ready. Persona: {_antibrow_browser.persona.get('ua', 'unknown')[:80]}...")
+            persona_os = getattr(_antibrow_browser.persona, "os", "desktop")
+            print(f"[antibrow] Browser ready (profile={launch_kwargs.get('profile')}, OS={persona_os}).")
             return _antibrow_browser
         except Exception as e:
             print(f"[antibrow] Failed to launch: {e}")
@@ -378,10 +382,11 @@ def _antibrow_get_page_html(url, wait_for_selector=None, timeout=30):
         # Wait for Cloudflare challenge to resolve (if present)
         # antibrow's real fingerprint means CF usually passes immediately,
         # but we still wait in case of a JS challenge
-        for _ in range(15):
+        for _ in range(25):
             title = page.title()
             if 'Just a moment' not in title and 'Checking' not in title:
                 break
+            print("  [antibrow] Cloudflare challenge detected, waiting...")
             time.sleep(2)
         
         # Wait for actual content if selector specified
