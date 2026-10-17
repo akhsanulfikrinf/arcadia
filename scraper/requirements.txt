@@ -6,3 +6,4 @@ beautifulsoup4
 curl_cffi
 antibrow
 playwright
+python-dotenv
